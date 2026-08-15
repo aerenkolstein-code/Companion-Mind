@@ -6,8 +6,6 @@ on:
       - main
       - "agent/**"
   pull_request:
-    branches:
-      - main
 
 permissions:
   contents: read
@@ -40,3 +38,13 @@ jobs:
           companion-mind demo --event-log "$event_dir/events.jsonl" > "$event_dir/live.json"
           companion-mind replay --event-log "$event_dir/events.jsonl" > "$event_dir/replayed.json"
           cmp "$event_dir/live.json" "$event_dir/replayed.json"
+
+          python - <<'PY' > "$event_dir/mitigation.json"
+          import json
+          from companion_mind.runtime import MitigationSpec
+          print(json.dumps(MitigationSpec.default().runtime_mapping()))
+          PY
+          companion-mind validate-mitigation \
+            --mitigation-spec "$event_dir/mitigation.json" \
+            > "$event_dir/validated.json"
+          test -s "$event_dir/validated.json"

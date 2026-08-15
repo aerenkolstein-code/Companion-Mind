@@ -8,6 +8,7 @@ from .models import (
     Event,
     StateDelta,
 )
+from .runtime import ClosureGuard, CompanionRuntime, MitigationSpec
 __all__ = [
     "BeliefCandidate",
     "CognitiveTask",
@@ -15,4 +16,7 @@ __all__ = [
     "Evaluation",
     "Event",
     "StateDelta",
+    "ClosureGuard",
+    "CompanionRuntime",
+    "MitigationSpec",
 ]
