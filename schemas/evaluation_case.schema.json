@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.org/schemas/evaluation-case.schema.json",
+  "title": "LLM Evaluation Case",
+  "type": "object",
+  "required": ["case_id", "title", "task", "inputs", "expected", "metrics", "privacy"],
+  "properties": {
+    "case_id": {"type": "string"},
+    "title": {"type": "string"},
+    "task": {"type": "string"},
+    "inputs": {"type": "array", "items": {"type": "object"}},
+    "expected": {"type": "object"},
+    "metrics": {"type": "array", "items": {"type": "string"}},
+    "failure_modes": {"type": "array", "items": {"type": "string"}},
+    "privacy": {"enum": ["PUBLIC", "PUBLIC_SAFE", "REDACTED"]},
+    "provenance": {"type": "array", "items": {"type": "string"}}
+  },
+  "additionalProperties": true
+}
