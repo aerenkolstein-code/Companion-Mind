@@ -1,0 +1,12 @@
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+.coverage
+.DS_Store
+/private/
+/raw/
+/l0/
+/personal/
+/credentials/
+*.env
