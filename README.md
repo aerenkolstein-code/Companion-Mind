@@ -11,7 +11,7 @@
 | Baseline accuracy | 20% |
 | With Closure Guard | 100% |
 | Known regression failures caught | 4/4 |
-| Runtime tests | 22/22 |
+| Runtime tests | 32/32 |
 | Live / replay snapshot | Exact match |
 | MitigationSpec contract | Validated + fingerprinted |
 
@@ -35,7 +35,9 @@ Companion-Mind implements the protection. The paired [LLM Evaluation Lab](https:
 
 ## Reproduce
 
-Requires Python 3.11 or later. No API key or third-party runtime dependency is required.
+Requires Python 3.12 or later. The declared validation dependencies install
+with the package; no API key is required for the current reproducible demos or
+the provider-free persona skeleton.
 
 ```bash
 python -m pip install -e .
@@ -65,6 +67,27 @@ companion-mind validate-mitigation --mitigation-spec /tmp/mitigation.json
 companion-mind demo --mitigation-spec /tmp/mitigation.json
 ```
 
+## LIN-ZHIYAO Runtime v0.2 — Step 01
+
+The repository now includes the provider-independent skeleton for the
+cross-model persona-continuity experiment. `LIN-ZHIYAO` is loaded from a
+strict, manually maintained persona document; a runtime session owns persona,
+relationship, conversation, and session state; and the validated state is
+persisted locally before any model adapter exists.
+
+```python
+from companion_mind import Runtime
+
+runtime = Runtime(personas_dir="personas", state_dir="data/state")
+state = runtime.start_session(persona_id="LIN-ZHIYAO")
+print(state.session.session_id)
+print(state.persona.persona_id)
+```
+
+This step does **not** connect DeepSeek, Grok, or any other provider. It does
+not claim cross-model continuity. Provider adapters, handoff, return, routing,
+and blind evaluation remain later gated steps.
+
 ## Evidence boundary
 
 ### Implemented
@@ -86,7 +109,7 @@ companion-mind demo --mitigation-spec /tmp/mitigation.json
 - guarded accuracy: **100%**;
 - premature closure rate: **100% → 0%**;
 - known recurrence variants caught: **4/4**;
-- runtime unit tests: **22/22**;
+- runtime unit tests: **32/32**;
 - live snapshot versus clean replay: **exact match**;
 - replayed public demo events: **5/5**.
 

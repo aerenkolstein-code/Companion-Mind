@@ -1,5 +1,6 @@
 __pycache__/
 *.py[cod]
+*.egg-info/
 .venv/
 .pytest_cache/
 .coverage
@@ -9,4 +10,5 @@ __pycache__/
 /l0/
 /personal/
 /credentials/
+/data/
 *.env

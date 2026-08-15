@@ -8,9 +8,11 @@ import json
 import os
 import sys
 from dataclasses import asdict, dataclass
+from datetime import datetime, timezone
 from itertools import count
 from pathlib import Path
-from typing import Any, Iterable, Mapping, Sequence
+from typing import Any, Callable, Iterable, Mapping, Sequence
+from uuid import UUID, uuid4
 
 from .models import (
     AgendaItem,
@@ -21,6 +23,14 @@ from .models import (
     Event,
     StateDelta,
 )
+from .persona import PersonaLoader
+from .state import (
+    ConversationState,
+    JsonStateStore,
+    RelationshipState,
+    RuntimeState,
+    SessionState,
+)
 
 
 class EventLogError(ValueError):
@@ -29,6 +39,60 @@ class EventLogError(ValueError):
 
 class MitigationSpecError(ValueError):
     """Raised when an executable mitigation contract is invalid or unsupported."""
+
+
+class Runtime:
+    """Minimal provider-free owner of one canonical persona and its state."""
+
+    def __init__(
+        self,
+        *,
+        personas_dir: str | Path = "personas",
+        state_dir: str | Path = "data/state",
+        session_id_factory: Callable[[], UUID] = uuid4,
+    ) -> None:
+        self.persona_loader = PersonaLoader(personas_dir)
+        self.state_store = JsonStateStore(state_dir)
+        self.session_id_factory = session_id_factory
+        self.current_state: RuntimeState | None = None
+
+    def start_session(self, persona_id: str = "LIN-ZHIYAO") -> RuntimeState:
+        """Create and persist a session before any model connection exists."""
+
+        persona = self.persona_loader.load(persona_id)
+        now = datetime.now(timezone.utc)
+        state = RuntimeState(
+            persona=persona,
+            session=SessionState(
+                session_id=self.session_id_factory(),
+                persona_id=persona.persona_id,
+                universe=persona.universe,
+            ),
+            relationship=RelationshipState(
+                persona_id=persona.persona_id,
+                counterpart_id=persona.relationship.counterpart_id,
+                relationship_status=persona.relationship.status,
+            ),
+            conversation=ConversationState(),
+            created_at=now,
+            updated_at=now,
+        )
+        self.state_store.save(state)
+        self.current_state = state
+        return state
+
+    def save_state(self) -> Path:
+        if self.current_state is None:
+            raise ValueError("no active runtime session")
+        self.current_state = self.current_state.model_copy(
+            update={"updated_at": datetime.now(timezone.utc)}
+        )
+        return self.state_store.save(self.current_state)
+
+    def load_session(self, session_id: UUID | str) -> RuntimeState:
+        state = self.state_store.load(session_id)
+        self.current_state = state
+        return state
 
 
 def _required_text(value: Mapping[str, Any], key: str) -> str:

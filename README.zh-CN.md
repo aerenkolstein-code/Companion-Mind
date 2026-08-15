@@ -35,6 +35,6 @@ cmp "$event_dir/live.json" "$event_dir/replayed.json"
 
 运行时 snapshot 会记录规范的 canonical SHA-256 fingerprint，供 Evaluation Lab 证明回归测试实际执行的是同一份配置。
 
-当前实测：**22/22 tests**、五个演示事件完整回放、live/replay snapshot 精确一致、MitigationSpec 已验证并留指纹。
+当前实测：**32/32 tests**、五个演示事件完整回放、live/replay snapshot 精确一致、MitigationSpec 已验证并留指纹。
 
 当前边界：无模型 API、无事务数据库、不证明 AI 意识，也不接入私人档案；以上只证明当前公开夹具与本地原型的可执行集成。
