@@ -11,7 +11,7 @@
 | Baseline accuracy | 20% |
 | With Closure Guard | 100% |
 | Known regression failures caught | 4/4 |
-| Runtime tests | 32/32 |
+| Runtime tests | 40/40 |
 | Live / replay snapshot | Exact match |
 | MitigationSpec contract | Validated + fingerprinted |
 
@@ -37,7 +37,7 @@ Companion-Mind implements the protection. The paired [LLM Evaluation Lab](https:
 
 Requires Python 3.12 or later. The declared validation dependencies install
 with the package; no API key is required for the current reproducible demos or
-the provider-free persona skeleton.
+the offline provider-contract tests.
 
 ```bash
 python -m pip install -e .
@@ -67,26 +67,49 @@ companion-mind validate-mitigation --mitigation-spec /tmp/mitigation.json
 companion-mind demo --mitigation-spec /tmp/mitigation.json
 ```
 
-## LIN-ZHIYAO Runtime v0.2 — Step 01
+## LIN-ZHIYAO Runtime v0.2 — Steps 01–02
 
 The repository now includes the provider-independent skeleton for the
 cross-model persona-continuity experiment. `LIN-ZHIYAO` is loaded from a
 strict, manually maintained persona document; a runtime session owns persona,
 relationship, conversation, and session state; and the validated state is
-persisted locally before any model adapter exists.
+persisted locally independently of model adapters.
 
 ```python
 from companion_mind import Runtime
 
-runtime = Runtime(personas_dir="personas", state_dir="data/state")
+runtime = Runtime(
+    personas_dir="personas",
+    state_dir="data/state",
+    raw_dir="data/raw",
+)
 state = runtime.start_session(persona_id="LIN-ZHIYAO")
 print(state.session.session_id)
 print(state.persona.persona_id)
 ```
 
-This step does **not** connect DeepSeek, Grok, or any other provider. It does
-not claim cross-model continuity. Provider adapters, handoff, return, routing,
-and blind evaluation remain later gated steps.
+Step 02 adds a provider-neutral chat boundary, a current DeepSeek V4 Flash
+adapter, deterministic prompt assembly, strict response parsing, and an
+append-only Unified RAW writer. The offline baseline runs 20 consecutive
+NORMAL-to-ROMANTIC turns through an injected transport and preserves one
+`persona_id`, `session_id`, state timeline, and provider/model provenance.
+
+```python
+from companion_mind import DeepSeekConfig, DeepSeekProvider
+
+provider = DeepSeekProvider(DeepSeekConfig.from_env())
+response = runtime.run_turn("晚上好，继续刚才的话题。", provider, thinking=False)
+print(response.content)
+```
+
+For a live call, set `DEEPSEEK_API_KEY`; the optional `DEEPSEEK_MODEL` defaults
+to `deepseek-v4-flash`. Credentials are never written to state or Unified RAW.
+The repository does **not** contain a key and CI never makes a paid model call.
+
+This step does not connect Grok and does not claim live-model effectiveness or
+cross-model continuity. The private historical RAW is also excluded from the
+repository and public CI. Handoff, return, routing, and blind evaluation remain
+later gated steps.
 
 ## Evidence boundary
 
@@ -109,7 +132,7 @@ and blind evaluation remain later gated steps.
 - guarded accuracy: **100%**;
 - premature closure rate: **100% → 0%**;
 - known recurrence variants caught: **4/4**;
-- runtime unit tests: **32/32**;
+- runtime unit tests: **40/40**;
 - live snapshot versus clean replay: **exact match**;
 - replayed public demo events: **5/5**.
 
@@ -118,6 +141,8 @@ and blind evaluation remain later gated steps.
 - production deployment;
 - transactional database durability;
 - broad model generalization;
+- live DeepSeek persona-effectiveness proof;
+- cross-model persona continuity;
 - scientific benchmark validity;
 - enterprise-grade reliability;
 - autonomous cognition or consciousness.
@@ -126,6 +151,9 @@ and blind evaluation remain later gated steps.
 
 - `companion_mind/models.py` — observable runtime contracts
 - `companion_mind/runtime.py` — event store, MitigationSpec loader, runtime, replay CLI, and guard
+- `companion_mind/providers/` — provider-neutral contracts and DeepSeek V4 adapter
+- `companion_mind/prompt.py` — runtime-owned persona/state prompt assembly
+- `companion_mind/raw/` — append-only Unified RAW conversation persistence
 - `tests/test_runtime.py` — contract, safeguard, persistence, replay, and state tests
 - `schemas/evaluation_case.schema.json` — shared evaluation contract
 - `docs/history/README.md` — audited Gen1 migration ledger

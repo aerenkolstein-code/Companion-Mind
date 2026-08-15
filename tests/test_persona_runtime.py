@@ -109,6 +109,18 @@ class PersonaRuntimeTest(unittest.TestCase):
         self.assertIsNone(event.provider)
         self.assertIsNone(event.model)
 
+        with self.assertRaisesRegex(
+            ValidationError, "assistant RAW events require provider and model"
+        ):
+            RawEvent(
+                session_id=state.session.session_id,
+                turn_index=1,
+                persona_id=state.persona.persona_id,
+                universe=state.persona.universe,
+                role="assistant",
+                content="untrusted",
+            )
+
     def test_runtime_state_rejects_cross_persona_mismatch(self) -> None:
         state = Runtime(
             personas_dir=PERSONAS_DIR, state_dir=self.state_dir

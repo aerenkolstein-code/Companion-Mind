@@ -24,9 +24,13 @@ from .models import (
     StateDelta,
 )
 from .persona import PersonaLoader
+from .prompt import PromptAssembler
+from .providers import ChatProvider, ProviderError, ProviderResponse
+from .raw import UnifiedRawWriter
 from .state import (
     ConversationState,
     JsonStateStore,
+    RawEvent,
     RelationshipState,
     RuntimeState,
     SessionState,
@@ -49,10 +53,13 @@ class Runtime:
         *,
         personas_dir: str | Path = "personas",
         state_dir: str | Path = "data/state",
+        raw_dir: str | Path = "data/raw",
         session_id_factory: Callable[[], UUID] = uuid4,
     ) -> None:
         self.persona_loader = PersonaLoader(personas_dir)
         self.state_store = JsonStateStore(state_dir)
+        self.raw_writer = UnifiedRawWriter(raw_dir)
+        self.prompt_assembler = PromptAssembler()
         self.session_id_factory = session_id_factory
         self.current_state: RuntimeState | None = None
 
@@ -93,6 +100,107 @@ class Runtime:
         state = self.state_store.load(session_id)
         self.current_state = state
         return state
+
+    def run_turn(
+        self,
+        user_content: str,
+        provider: ChatProvider,
+        *,
+        thinking: bool = False,
+    ) -> ProviderResponse:
+        """Run one provider turn while the runtime retains identity ownership."""
+
+        if self.current_state is None:
+            raise ValueError("no active runtime session")
+        content = user_content.strip()
+        if not content:
+            raise ValueError("user content must not be empty")
+
+        state = self.current_state
+        turn_index = state.session.turn_index + 1
+        history = self.raw_writer.read(state.session.session_id)
+        messages = self.prompt_assembler.assemble(
+            state,
+            content,
+            history=history,
+        )
+        user_event = RawEvent(
+            session_id=state.session.session_id,
+            turn_index=turn_index,
+            persona_id=state.persona.persona_id,
+            universe=state.persona.universe,
+            role="user",
+            route_state=state.session.active_route,
+            content=content,
+        )
+        self.raw_writer.append(user_event)
+        try:
+            response = provider.generate(messages, thinking=thinking)
+        except ProviderError as exc:
+            self.raw_writer.append(
+                RawEvent(
+                    session_id=state.session.session_id,
+                    turn_index=turn_index,
+                    persona_id=state.persona.persona_id,
+                    universe=state.persona.universe,
+                    role="runtime",
+                    provider=provider.name,
+                    model=provider.model,
+                    route_state=state.session.active_route,
+                    route_reason="provider_error",
+                    content=str(exc),
+                    status="failed",
+                )
+            )
+            raise
+        if response.provider != provider.name or response.model != provider.model:
+            mismatch = ProviderError("provider response identity mismatch")
+            self.raw_writer.append(
+                RawEvent(
+                    session_id=state.session.session_id,
+                    turn_index=turn_index,
+                    persona_id=state.persona.persona_id,
+                    universe=state.persona.universe,
+                    role="runtime",
+                    provider=provider.name,
+                    model=provider.model,
+                    route_state=state.session.active_route,
+                    route_reason="provider_error",
+                    content=str(mismatch),
+                    status="failed",
+                )
+            )
+            raise mismatch
+
+        self.raw_writer.append(
+            RawEvent(
+                session_id=state.session.session_id,
+                turn_index=turn_index,
+                persona_id=state.persona.persona_id,
+                universe=state.persona.universe,
+                role="assistant",
+                provider=response.provider,
+                model=response.model,
+                route_state=state.session.active_route,
+                route_reason="runtime_default",
+                content=response.content,
+            )
+        )
+        updated_session = state.session.model_copy(
+            update={
+                "active_provider": response.provider,
+                "last_provider": state.session.active_provider,
+                "turn_index": turn_index,
+            }
+        )
+        self.current_state = state.model_copy(
+            update={
+                "session": updated_session,
+                "updated_at": datetime.now(timezone.utc),
+            }
+        )
+        self.state_store.save(self.current_state)
+        return response
 
 
 def _required_text(value: Mapping[str, Any], key: str) -> str:

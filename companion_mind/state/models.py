@@ -67,6 +67,20 @@ class RawEvent(RuntimeModel):
     created_at: datetime = Field(default_factory=utc_now)
     status: Literal["complete", "failed", "correction"] = "complete"
 
+    @model_validator(mode="after")
+    def validate_provenance(self) -> "RawEvent":
+        has_provider = self.provider is not None
+        has_model = self.model is not None
+        if has_provider != has_model:
+            raise ValueError("provider and model must be recorded together")
+        if self.role == "assistant" and not has_provider:
+            raise ValueError("assistant RAW events require provider and model")
+        if self.role == "user" and has_provider:
+            raise ValueError("user RAW events must not claim provider provenance")
+        if self.status == "failed" and self.role != "runtime":
+            raise ValueError("failed RAW events must use the runtime role")
+        return self
+
 
 class RuntimeState(RuntimeModel):
     schema_version: Literal["lin-zhiyao-runtime-state/v1"] = (
