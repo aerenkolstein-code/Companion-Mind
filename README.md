@@ -1,67 +1,82 @@
 # Companion-Mind
 
-**A minimal continuous cognitive runtime with observable state, provenance and executable safeguards.**
+**Runtime layer for state, provenance, closure guards, and decision traces in long-running LLM workflows.**
 
-Portfolio Status: **CURRENT ARTIFACT** · Evidence Level: **E3 — executable, locally tested prototype**
+[![Test](https://github.com/aerenkolstein-code/Companion-Mind/actions/workflows/test.yml/badge.svg)](https://github.com/aerenkolstein-code/Companion-Mind/actions/workflows/test.yml)
 
-Long-context retrieval answers: *Can the system find the past?* Companion-Mind asks the operational question: *Can the right constraint become active before the next state write?*
+## First Closed Loop
 
-## First closed-loop artifact
+| Result | Measured value |
+|---|---:|
+| Baseline accuracy | 20% |
+| With Closure Guard | 100% |
+| Known regression failures caught | 4/4 |
+| Runtime tests | 7/7 |
 
-`CM-GUARD-001` implements a **Closure Guard** for `EVAL-CASE-001`:
+**Status:** Experimental / reproducible artifact  
+**Evidence level:** E3 — executable, tested prototype
 
-```text
-Event → StateDelta → Agenda → BeliefCandidate
-→ Evaluation → DecisionTrace → guarded state write
+```mermaid
+flowchart LR
+  A[Event] --> B[State / Agenda]
+  B --> C[Belief Candidate]
+  C --> D[Evaluation]
+  D --> E[Closure Guard]
+  E --> F[Decision Trace]
 ```
 
-The failure: one child task is complete, another required child remains open, but a parent goal is declared done. The guard reads structured child state and rejects parent closure while any required child is `OPEN`, `UNKNOWN`, waiting, blocked or pending.
+Companion-Mind implements the protection. The paired [LLM Evaluation Lab](https://github.com/aerenkolstein-code/llm-evaluation-lab) tests whether that protection works.
 
-The paired LLM Evaluation Lab run measured the naive baseline against this guard on five public-safe variants:
+`CM-GUARD-001` addresses **Premature Parent Closure**: a parent goal must not be marked `DONE` while any required child remains open, unknown, waiting, blocked, or pending. The guard reads structured child state before permitting the write.
 
-| Policy | Accuracy | Premature closure rate |
-|---|---:|---:|
-| Naive baseline | 20% | 100% |
-| `CM-GUARD-001` | 100% | 0% |
+> In the current reproducible first-closed-loop evaluation, the implemented Closure Guard improved the tested cases from 20% baseline accuracy to 100%; broader generalization has not yet been established.
 
-These are deterministic fixture results, not production or model-quality claims.
+## Reproduce
 
-## Run
+Requires Python 3.11 or later. No API key or third-party runtime dependency is required.
 
 ```bash
+python -m pip install -e .
 python -m unittest discover -s tests -v
 python -m companion_mind.runtime
 ```
 
-No API key or third-party dependency is required.
+## Evidence boundary
 
-## What is real today
+### Implemented
 
-- six small public data contracts;
+- minimal event-to-state runtime;
 - persistent state and active agenda separated from prose;
-- candidate beliefs evaluated before state mutation;
-- an executable Closure Guard;
-- sourced `DecisionTrace` records;
-- duplicate-event suppression and a per-event task budget;
-- a shared public `EvaluationCase` schema with LLM Evaluation Lab.
+- provenance-bearing `BeliefCandidate` and `DecisionTrace` records;
+- `CM-GUARD-001` Closure Guard;
+- duplicate-event suppression and per-event task budget;
+- shared public `EvaluationCase` schema.
 
-## Limits and next step
+### Measured in the current demonstration
 
-This is a deterministic research prototype, not a production agent framework. It does not call a foundation model, persist to a database, prove autonomous cognition or establish performance beyond the published fixture. The next step is to add a second public-safe failure class without weakening traceability or the public/private boundary.
+- baseline accuracy: **20%**;
+- guarded accuracy: **100%**;
+- premature closure rate: **100% → 0%**;
+- known recurrence variants caught: **4/4**;
+- runtime unit tests: **7/7**.
+
+### Not claimed
+
+- production deployment;
+- broad model generalization;
+- scientific benchmark validity;
+- enterprise-grade reliability;
+- autonomous cognition or consciousness.
 
 ## Repository map
 
-- `companion_mind/models.py` — minimal observable contracts
+- `companion_mind/models.py` — observable runtime contracts
 - `companion_mind/runtime.py` — runtime loop and `CM-GUARD-001`
-- `tests/test_runtime.py` — safeguard and regression assertions
-- `schemas/evaluation_case.schema.json` — shared case contract
+- `tests/test_runtime.py` — safeguard and state-transition tests
+- `schemas/evaluation_case.schema.json` — shared evaluation contract
 - `docs/history/README.md` — audited Gen1 migration ledger
-
-## Five-repository role
-
-**Companion-Mind builds safeguards.** LLM Evaluation Lab owns cases, metrics, mitigations and regressions. Human-AI Education Lab stages cognitive pressure; Qigouguan and Guo remain deferred public-safe case mines.
 
 ## Privacy
 
-Only synthetic/public-safe events and traces are used. There are no links or paths to private Raw, L0, relationship, financial, medical, account or unpublished-manuscript material.
+Only synthetic, public-safe events and traces are used. The repository contains no private Raw/L0 material, credentials, account data, client documents, personal records, or links to private archives.
 
