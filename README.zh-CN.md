@@ -19,9 +19,9 @@ Portfolio Status：**CURRENT ARTIFACT** · Evidence Level：**E3——可运行�
 
 以上是公开测试夹具结果，不是生产性能或通用模型能力声明。
 
-## Stateful Runtime v0.2
+## Executable Integration v0.3
 
-当前纵切加入 append-only JSONL 事件日志、State/Agenda 持久化重建、StateDelta 留痕和确定性 Replay。Closure Guard 不再只读取同一请求携带的 children，也能读取此前事件形成的结构化状态。
+当前纵切保留 append-only JSONL、State/Agenda 重建与确定性 Replay，并新增 `mitigation-spec/v1` 加载。Evaluation Lab 产出的 JSON 规范经过版本、目标错误、Guard 类型、决策映射和状态集合校验后，才注册为 `CM-GUARD-001`；不支持或含糊的规范直接失败关闭。
 
 ```bash
 python -m pip install -e .
@@ -33,6 +33,8 @@ companion-mind replay --event-log "$event_dir/events.jsonl" > "$event_dir/replay
 cmp "$event_dir/live.json" "$event_dir/replayed.json"
 ```
 
-当前实测：**15/15 tests**、五个演示事件完整回放、live/replay snapshot 精确一致。
+运行时 snapshot 会记录规范的 canonical SHA-256 fingerprint，供 Evaluation Lab 证明回归测试实际执行的是同一份配置。
 
-当前边界：无模型 API、无事务数据库、不证明 AI 意识，也不接入私人档案。下一步是双仓 Executable Integration，让 Evaluation Lab 产生的 MitigationSpec 成为运行时 Guard 的可执行输入。
+当前实测：**22/22 tests**、五个演示事件完整回放、live/replay snapshot 精确一致、MitigationSpec 已验证并留指纹。
+
+当前边界：无模型 API、无事务数据库、不证明 AI 意识，也不接入私人档案；以上只证明当前公开夹具与本地原型的可执行集成。

@@ -11,8 +11,9 @@
 | Baseline accuracy | 20% |
 | With Closure Guard | 100% |
 | Known regression failures caught | 4/4 |
-| Runtime tests | 15/15 |
+| Runtime tests | 22/22 |
 | Live / replay snapshot | Exact match |
+| MitigationSpec contract | Validated + fingerprinted |
 
 **Status:** Experimental / reproducible artifact  
 **Evidence level:** E3 — executable, tested prototype
@@ -50,6 +51,20 @@ The demo writes five synthetic events, blocks the first closure request while a
 required agenda item is open, accepts closure after that item becomes terminal,
 and then proves that a clean replay reconstructs the same state and traces.
 
+## Executable MitigationSpec v0.3
+
+The runtime can now load the JSON contract emitted by LLM Evaluation Lab. It
+validates the schema version, target failure, guard type, decision mapping and
+status sets before registering `CM-GUARD-001`. Unsupported or ambiguous specs
+fail closed. A canonical SHA-256 fingerprint is included in runtime snapshots so
+the evaluation report can prove which configuration actually ran.
+
+```bash
+llm-eval --emit-mitigation /tmp/mitigation.json --output /tmp/evaluation.json
+companion-mind validate-mitigation --mitigation-spec /tmp/mitigation.json
+companion-mind demo --mitigation-spec /tmp/mitigation.json
+```
+
 ## Evidence boundary
 
 ### Implemented
@@ -58,6 +73,8 @@ and then proves that a clean replay reconstructs the same state and traces.
 - append-only, fsynced JSONL event persistence;
 - state-backed active agenda separated from prose;
 - deterministic replay of state, agenda, deltas, and decision traces;
+- validated `mitigation-spec/v1` loading and canonical fingerprinting;
+- spec-configured Closure Guard registration;
 - provenance-bearing `BeliefCandidate` and `DecisionTrace` records;
 - `CM-GUARD-001` Closure Guard;
 - duplicate-event suppression and per-event task budget;
@@ -69,7 +86,7 @@ and then proves that a clean replay reconstructs the same state and traces.
 - guarded accuracy: **100%**;
 - premature closure rate: **100% → 0%**;
 - known recurrence variants caught: **4/4**;
-- runtime unit tests: **15/15**;
+- runtime unit tests: **22/22**;
 - live snapshot versus clean replay: **exact match**;
 - replayed public demo events: **5/5**.
 
@@ -85,8 +102,8 @@ and then proves that a clean replay reconstructs the same state and traces.
 ## Repository map
 
 - `companion_mind/models.py` — observable runtime contracts
-- `companion_mind/runtime.py` — event store, runtime loop, replay CLI, and guard
-- `tests/test_runtime.py` — safeguard, persistence, replay, and state tests
+- `companion_mind/runtime.py` — event store, MitigationSpec loader, runtime, replay CLI, and guard
+- `tests/test_runtime.py` — contract, safeguard, persistence, replay, and state tests
 - `schemas/evaluation_case.schema.json` — shared evaluation contract
 - `docs/history/README.md` — audited Gen1 migration ledger
 
