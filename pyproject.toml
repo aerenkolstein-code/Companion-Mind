@@ -4,10 +4,13 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "companion-mind"
-version = "0.1.0"
-description = "Experimental continuous cognitive runtime skeleton"
+version = "0.2.0"
+description = "Replayable state and safeguard runtime for long-running LLM workflows"
 requires-python = ">=3.11"
 dependencies = []
+
+[project.scripts]
+companion-mind = "companion_mind.runtime:main"
 
 [tool.setuptools.packages.find]
 include = ["companion_mind*"]

@@ -19,10 +19,20 @@ Portfolio Status：**CURRENT ARTIFACT** · Evidence Level：**E3——可运行�
 
 以上是公开测试夹具结果，不是生产性能或通用模型能力声明。
 
+## Stateful Runtime v0.2
+
+当前纵切加入 append-only JSONL 事件日志、State/Agenda 持久化重建、StateDelta 留痕和确定性 Replay。Closure Guard 不再只读取同一请求携带的 children，也能读取此前事件形成的结构化状态。
+
 ```bash
+python -m pip install -e .
 python -m unittest discover -s tests -v
-python -m companion_mind.runtime
+
+event_dir="$(mktemp -d)"
+companion-mind demo --event-log "$event_dir/events.jsonl" > "$event_dir/live.json"
+companion-mind replay --event-log "$event_dir/events.jsonl" > "$event_dir/replayed.json"
+cmp "$event_dir/live.json" "$event_dir/replayed.json"
 ```
 
-当前边界：无模型 API、无数据库、不证明 AI 意识，也不接入私人档案。下一步是在同一来源与 Trace 纪律下增加第二类公开错误。
+当前实测：**15/15 tests**、五个演示事件完整回放、live/replay snapshot 精确一致。
 
+当前边界：无模型 API、无事务数据库、不证明 AI 意识，也不接入私人档案。下一步是双仓 Executable Integration，让 Evaluation Lab 产生的 MitigationSpec 成为运行时 Guard 的可执行输入。

@@ -4,7 +4,7 @@ on:
   push:
     branches:
       - main
-      - agent/first-closed-loop
+      - "agent/**"
   pull_request:
     branches:
       - main
@@ -34,6 +34,9 @@ jobs:
       - name: Run unit tests
         run: python -m unittest discover -s tests -v
 
-      - name: Run public demo
-        run: python -m companion_mind.runtime
-
+      - name: Verify installed CLI and deterministic replay
+        run: |
+          event_dir="$(mktemp -d)"
+          companion-mind demo --event-log "$event_dir/events.jsonl" > "$event_dir/live.json"
+          companion-mind replay --event-log "$event_dir/events.jsonl" > "$event_dir/replayed.json"
+          cmp "$event_dir/live.json" "$event_dir/replayed.json"
