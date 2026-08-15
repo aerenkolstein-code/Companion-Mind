@@ -11,7 +11,8 @@
 | Baseline accuracy | 20% |
 | With Closure Guard | 100% |
 | Known regression failures caught | 4/4 |
-| Runtime tests | 7/7 |
+| Runtime tests | 15/15 |
+| Live / replay snapshot | Exact match |
 
 **Status:** Experimental / reproducible artifact  
 **Evidence level:** E3 — executable, tested prototype
@@ -38,15 +39,25 @@ Requires Python 3.11 or later. No API key or third-party runtime dependency is r
 ```bash
 python -m pip install -e .
 python -m unittest discover -s tests -v
-python -m companion_mind.runtime
+
+event_dir="$(mktemp -d)"
+companion-mind demo --event-log "$event_dir/events.jsonl" > "$event_dir/live.json"
+companion-mind replay --event-log "$event_dir/events.jsonl" > "$event_dir/replayed.json"
+cmp "$event_dir/live.json" "$event_dir/replayed.json"
 ```
+
+The demo writes five synthetic events, blocks the first closure request while a
+required agenda item is open, accepts closure after that item becomes terminal,
+and then proves that a clean replay reconstructs the same state and traces.
 
 ## Evidence boundary
 
 ### Implemented
 
-- minimal event-to-state runtime;
-- persistent state and active agenda separated from prose;
+- typed event-to-state contracts;
+- append-only, fsynced JSONL event persistence;
+- state-backed active agenda separated from prose;
+- deterministic replay of state, agenda, deltas, and decision traces;
 - provenance-bearing `BeliefCandidate` and `DecisionTrace` records;
 - `CM-GUARD-001` Closure Guard;
 - duplicate-event suppression and per-event task budget;
@@ -58,11 +69,14 @@ python -m companion_mind.runtime
 - guarded accuracy: **100%**;
 - premature closure rate: **100% → 0%**;
 - known recurrence variants caught: **4/4**;
-- runtime unit tests: **7/7**.
+- runtime unit tests: **15/15**;
+- live snapshot versus clean replay: **exact match**;
+- replayed public demo events: **5/5**.
 
 ### Not claimed
 
 - production deployment;
+- transactional database durability;
 - broad model generalization;
 - scientific benchmark validity;
 - enterprise-grade reliability;
@@ -71,12 +85,11 @@ python -m companion_mind.runtime
 ## Repository map
 
 - `companion_mind/models.py` — observable runtime contracts
-- `companion_mind/runtime.py` — runtime loop and `CM-GUARD-001`
-- `tests/test_runtime.py` — safeguard and state-transition tests
+- `companion_mind/runtime.py` — event store, runtime loop, replay CLI, and guard
+- `tests/test_runtime.py` — safeguard, persistence, replay, and state tests
 - `schemas/evaluation_case.schema.json` — shared evaluation contract
 - `docs/history/README.md` — audited Gen1 migration ledger
 
 ## Privacy
 
 Only synthetic, public-safe events and traces are used. The repository contains no private Raw/L0 material, credentials, account data, client documents, personal records, or links to private archives.
-

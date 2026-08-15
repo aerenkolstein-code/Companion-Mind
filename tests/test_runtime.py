@@ -1,7 +1,18 @@
+import io
+import json
+import tempfile
 import unittest
+from contextlib import redirect_stdout
+from pathlib import Path
 
 from companion_mind.models import Event
-from companion_mind.runtime import ClosureGuard, CompanionRuntime
+from companion_mind.runtime import (
+    ClosureGuard,
+    CompanionRuntime,
+    EventLogError,
+    JsonlEventStore,
+    main,
+)
 
 
 class ClosureGuardTest(unittest.TestCase):
@@ -92,7 +103,150 @@ class RuntimeTest(unittest.TestCase):
         self.assertEqual(runtime.ingest(event), [])
         self.assertEqual(len(runtime.traces), 1)
 
+    def agenda_event(self, event_id: str, status: str) -> Event:
+        return Event(
+            event_id=event_id,
+            kind="agenda_item_upserted",
+            payload={
+                "item_id": "qualification",
+                "parent_id": "onboarding",
+                "status": status,
+                "required": True,
+            },
+            source="public-test-fixture",
+        )
+
+    def state_closure_event(self, event_id: str) -> Event:
+        return Event(
+            event_id=event_id,
+            kind="parent_closure_requested",
+            payload={"parent_id": "onboarding"},
+            source="public-test-fixture",
+        )
+
+    def test_state_backed_open_agenda_blocks_closure(self) -> None:
+        runtime = CompanionRuntime()
+        runtime.ingest(self.agenda_event("evt-agenda-open", "OPEN"))
+        traces = runtime.ingest(self.state_closure_event("evt-state-check"))
+
+        self.assertIn("qualification", runtime.agenda)
+        self.assertEqual(traces[0].evaluation.decision, "REJECT")
+        self.assertEqual(runtime.state["parent_status"]["onboarding"], "OPEN")
+
+    def test_terminal_update_clears_agenda_and_allows_closure(self) -> None:
+        runtime = CompanionRuntime()
+        runtime.ingest(self.agenda_event("evt-agenda-open", "OPEN"))
+        runtime.ingest(self.agenda_event("evt-agenda-done", "DONE"))
+        traces = runtime.ingest(self.state_closure_event("evt-state-close"))
+
+        self.assertEqual(runtime.agenda, {})
+        self.assertEqual(traces[0].evaluation.decision, "ACCEPT")
+        self.assertEqual(runtime.state["parent_status"]["onboarding"], "DONE")
+
+
+class EventContractTest(unittest.TestCase):
+    def test_event_mapping_requires_fields_and_object_payload(self) -> None:
+        with self.assertRaisesRegex(ValueError, "missing event field"):
+            Event.from_mapping({"event_id": "evt", "kind": "test", "payload": {}})
+        with self.assertRaisesRegex(ValueError, "payload must be an object"):
+            Event.from_mapping(
+                {"event_id": "evt", "kind": "test", "payload": [], "source": "test"}
+            )
+        with self.assertRaisesRegex(ValueError, "event_id must be"):
+            Event.from_mapping(
+                {"event_id": None, "kind": "test", "payload": {}, "source": "test"}
+            )
+
+
+class EventStoreTest(unittest.TestCase):
+    def setUp(self) -> None:
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp_dir.cleanup)
+        self.path = Path(self.temp_dir.name) / "events.jsonl"
+        self.store = JsonlEventStore(self.path)
+
+    @staticmethod
+    def event(event_id: str, status: str = "OPEN") -> Event:
+        return Event(
+            event_id=event_id,
+            kind="agenda_item_upserted",
+            payload={
+                "item_id": "qualification",
+                "parent_id": "onboarding",
+                "status": status,
+                "required": True,
+            },
+            source="public-test-fixture",
+        )
+
+    def test_replay_reconstructs_identical_snapshot(self) -> None:
+        live = CompanionRuntime(event_store=self.store)
+        live.ingest(self.event("evt-one", "OPEN"))
+        live.ingest(
+            Event(
+                "evt-two",
+                "parent_closure_requested",
+                {"parent_id": "onboarding"},
+                "public-test-fixture",
+            )
+        )
+
+        replayed = CompanionRuntime.replay(self.store)
+        self.assertEqual(replayed.snapshot(), live.snapshot())
+
+    def test_duplicate_event_is_not_appended(self) -> None:
+        runtime = CompanionRuntime(event_store=self.store)
+        event = self.event("evt-once")
+        runtime.ingest(event)
+        runtime.ingest(event)
+        self.assertEqual(len(self.store.read()), 1)
+        self.assertEqual(len(self.path.read_text(encoding="utf-8").splitlines()), 1)
+
+    def test_corrupt_log_fails_closed(self) -> None:
+        self.path.write_text("{not-json}\n", encoding="utf-8")
+        with self.assertRaises(EventLogError):
+            self.store.read()
+
+    def test_invalid_event_is_not_persisted(self) -> None:
+        runtime = CompanionRuntime(event_store=self.store)
+        invalid = Event(
+            "evt-invalid",
+            "agenda_item_upserted",
+            {"parent_id": "onboarding"},
+            "public-test-fixture",
+        )
+        with self.assertRaises(ValueError):
+            runtime.ingest(invalid)
+        self.assertFalse(self.path.exists())
+
+        malformed_children = Event(
+            "evt-malformed",
+            "parent_closure_requested",
+            {"parent_id": "onboarding", "children": ["not-an-object"]},
+            "public-test-fixture",
+        )
+        with self.assertRaises(ValueError):
+            runtime.ingest(malformed_children)
+        self.assertFalse(self.path.exists())
+
+    def test_cli_demo_and_replay_match(self) -> None:
+        live_output = io.StringIO()
+        with redirect_stdout(live_output):
+            self.assertEqual(
+                main(["demo", "--event-log", str(self.path)]),
+                0,
+            )
+        replay_output = io.StringIO()
+        with redirect_stdout(replay_output):
+            self.assertEqual(
+                main(["replay", "--event-log", str(self.path)]),
+                0,
+            )
+        self.assertEqual(
+            json.loads(live_output.getvalue()),
+            json.loads(replay_output.getvalue()),
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
-
