@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run the private GLM/GPT Native persona diagnostic without Runtime state."""
+"""Run the private three-model GLM Native persona diagnostic without Runtime."""
 
 from __future__ import annotations
 
@@ -33,9 +33,9 @@ from deepseek_private_baseline import (  # noqa: E402
 )
 
 
-PRIVATE_REPORT_SCHEMA = "lin-zhiyao-cross-model-native-private/v1"
-BLIND_REPORT_SCHEMA = "lin-zhiyao-cross-model-native-blind/v1"
-PUBLIC_REPORT_SCHEMA = "lin-zhiyao-cross-model-native-public/v1"
+PRIVATE_REPORT_SCHEMA = "lin-zhiyao-glm-three-model-native-private/v1"
+BLIND_REPORT_SCHEMA = "lin-zhiyao-glm-three-model-native-blind/v1"
+PUBLIC_REPORT_SCHEMA = "lin-zhiyao-glm-three-model-native-public/v1"
 TEMPERATURE = 1.0
 MAX_OUTPUT_TOKENS = 4096
 
@@ -73,14 +73,14 @@ class NativeResponse:
     usage: Mapping[str, Any]
 
 
-def provider_specs_from_env() -> tuple[ProviderSpec, ProviderSpec]:
-    """Return the two locked providers in execution order."""
+def provider_specs_from_env() -> tuple[ProviderSpec, ...]:
+    """Return the three locked GLM model configurations in execution order."""
 
     return (
         ProviderSpec(
-            key="glm",
+            key="glm_45_air",
             provider="zhipu",
-            model=os.environ.get("GLM_MODEL", "glm-4.6"),
+            model=os.environ.get("GLM_45_AIR_MODEL", "glm-4.5-air"),
             endpoint=os.environ.get(
                 "GLM_CHAT_COMPLETIONS_URL",
                 "https://open.bigmodel.cn/api/paas/v4/chat/completions",
@@ -89,15 +89,28 @@ def provider_specs_from_env() -> tuple[ProviderSpec, ProviderSpec]:
             thinking_mode="disabled",
         ),
         ProviderSpec(
-            key="gpt",
-            provider="openai",
-            model=os.environ.get("OPENAI_MODEL", "gpt-4.1-mini-2025-04-14"),
-            endpoint=os.environ.get(
-                "OPENAI_CHAT_COMPLETIONS_URL",
-                "https://api.openai.com/v1/chat/completions",
+            key="glm_41v_thinking_flashx",
+            provider="zhipu",
+            model=os.environ.get(
+                "GLM_41V_THINKING_FLASHX_MODEL", "glm-4.1v-thinking-flashx"
             ),
-            api_key=os.environ.get("OPENAI_API_KEY", ""),
-            thinking_mode="not_applicable_non_reasoning_model",
+            endpoint=os.environ.get(
+                "GLM_CHAT_COMPLETIONS_URL",
+                "https://open.bigmodel.cn/api/paas/v4/chat/completions",
+            ),
+            api_key=os.environ.get("GLM_API_KEY", ""),
+            thinking_mode="model_default_built_in",
+        ),
+        ProviderSpec(
+            key="glm_47_flash",
+            provider="zhipu",
+            model=os.environ.get("GLM_47_FLASH_MODEL", "glm-4.7-flash"),
+            endpoint=os.environ.get(
+                "GLM_CHAT_COMPLETIONS_URL",
+                "https://open.bigmodel.cn/api/paas/v4/chat/completions",
+            ),
+            api_key=os.environ.get("GLM_API_KEY", ""),
+            thinking_mode="disabled",
         ),
     )
 
@@ -113,7 +126,7 @@ def _request_payload(
         "temperature": TEMPERATURE,
         "max_tokens": MAX_OUTPUT_TOKENS,
     }
-    if spec.key == "glm":
+    if spec.thinking_mode == "disabled":
         payload["thinking"] = {"type": "disabled"}
     return payload
 
@@ -332,7 +345,7 @@ def _blind_packet(
 ) -> tuple[dict[str, Any], dict[str, str]]:
     keys = sorted(private_results)
     secrets.SystemRandom().shuffle(keys)
-    aliases = ("MODEL_A", "MODEL_B")
+    aliases = ("MODEL_A", "MODEL_B", "MODEL_C")
     alias_map = dict(zip(aliases, keys, strict=True))
     packet = {
         "schema_version": BLIND_REPORT_SCHEMA,
@@ -385,8 +398,16 @@ def run_diagnostic(
 ) -> dict[str, Any]:
     """Run exactly one 20-turn Native conversation for each locked provider."""
 
-    if [spec.key for spec in specs] != ["glm", "gpt"]:
-        raise ValueError("diagnostic requires exactly GLM then GPT")
+    expected_keys = [
+        "glm_45_air",
+        "glm_41v_thinking_flashx",
+        "glm_47_flash",
+    ]
+    if [spec.key for spec in specs] != expected_keys:
+        raise ValueError(
+            "diagnostic requires exactly glm-4.5-air, "
+            "glm-4.1v-thinking-flashx, then glm-4.7-flash"
+        )
     private_results: dict[str, Any] = {}
     public_results: dict[str, Any] = {}
     for spec in specs:
@@ -417,7 +438,7 @@ def run_diagnostic(
         "schema_version": PRIVATE_REPORT_SCHEMA,
         "corpus_sha256": corpus_sha256,
         "expected_turns_per_model": EXPECTED_TURNS,
-        "paid_call_count": EXPECTED_TURNS * len(specs),
+        "api_call_count": EXPECTED_TURNS * len(specs),
         "blinding_map": alias_map,
         "results": private_results,
     }
@@ -430,10 +451,10 @@ def run_diagnostic(
     public_report = {
         "schema_version": PUBLIC_REPORT_SCHEMA,
         "status": "PASS" if not structural_failures else "FAIL",
-        "experiment": "ENG-DIAG-01 Cross-Model Native Persona Baseline",
+        "experiment": "ENG-DIAG-01C GLM Three-Model Native Persona Baseline",
         "corpus_sha256": corpus_sha256,
         "expected_turns_per_model": EXPECTED_TURNS,
-        "paid_call_count": EXPECTED_TURNS * len(specs),
+        "api_call_count": EXPECTED_TURNS * len(specs),
         "persona_seed_sha256": next(iter(seed_hashes)) if len(seed_hashes) == 1 else None,
         "private_report_sha256": _sha256_bytes(private_bytes),
         "blind_report_sha256": _sha256_bytes(blind_bytes),
@@ -465,7 +486,7 @@ def run_diagnostic(
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="Run private GLM/GPT Native persona baselines safely."
+        description="Run three private GLM Native persona baselines safely."
     )
     parser.add_argument("--personas-dir", type=Path, default=Path("personas"))
     parser.add_argument("--private-output", type=Path, required=True)
@@ -488,7 +509,7 @@ def main() -> int:
             {
                 "schema_version": report["schema_version"],
                 "status": report["status"],
-                "paid_call_count": report["paid_call_count"],
+                "api_call_count": report["api_call_count"],
                 "corpus_sha256": report["corpus_sha256"],
                 "semantic_gate": report["semantic_gate"],
             },

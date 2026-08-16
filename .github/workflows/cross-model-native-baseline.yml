@@ -1,10 +1,16 @@
-name: ENG-DIAG-01 Cross-Model Native Persona Baseline
+name: ENG-DIAG-01C GLM Three-Model Native Persona Baseline
 
 on:
+  # One-shot registration path for this same-repository stacked PR. This
+  # trigger is removed immediately after the authorized run completes.
+  pull_request:
+    types: [synchronize]
+    paths:
+      - ".github/workflows/cross-model-native-baseline.yml"
   workflow_dispatch:
     inputs:
-      confirm_paid_run:
-        description: "Type RUN_40_PAID_CALLS to authorize exactly 40 paid calls"
+      confirm_glm_run:
+        description: "Type RUN_60_GLM_CALLS to authorize exactly 60 GLM API calls"
         required: true
         type: string
 
@@ -12,27 +18,43 @@ permissions:
   contents: read
 
 concurrency:
-  group: eng-diag-01-cross-model-native-${{ github.ref }}
+  group: eng-diag-01c-glm-three-model-native-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
   cross-model-native:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'pull_request' &&
+       github.event.pull_request.number == 5 &&
+       github.event.pull_request.head.repo.full_name == github.repository &&
+       github.event.pull_request.head.ref == 'agent/lin-zhiyao-runtime-v0.2-step02')
     runs-on: ubuntu-latest
     timeout-minutes: 45
     env:
       GLM_API_KEY: ${{ secrets.GLM_API_KEY }}
-      GLM_MODEL: glm-4.6
-      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-      OPENAI_MODEL: gpt-4.1-mini-2025-04-14
+      GLM_45_AIR_MODEL: glm-4.5-air
+      GLM_41V_THINKING_FLASHX_MODEL: glm-4.1v-thinking-flashx
+      GLM_47_FLASH_MODEL: glm-4.7-flash
       LIN_ZHIYAO_CORPUS_B64: ${{ secrets.LIN_ZHIYAO_CORPUS_B64 }}
     steps:
-      - name: Check paid-run authorization
+      - name: Check one-shot GLM-run authorization
         shell: bash
         run: |
-          if [[ "${{ inputs.confirm_paid_run }}" != "RUN_40_PAID_CALLS" ]]; then
-            echo "Paid run was not explicitly authorized" >&2
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            [[ "${{ inputs.confirm_glm_run }}" == "RUN_60_GLM_CALLS" ]] && exit 0
+            echo "GLM run was not explicitly authorized" >&2
             exit 2
           fi
+          if [[ "${{ github.event_name }}" == "pull_request" \
+             && "${{ github.event.pull_request.number }}" == "5" \
+             && "${{ github.event.pull_request.head.repo.full_name }}" == "${{ github.repository }}" \
+             && "${{ github.event.pull_request.head.ref }}" == "agent/lin-zhiyao-runtime-v0.2-step02" ]]; then
+            echo "Authorized one-shot same-repository PR synchronization"
+            exit 0
+          fi
+          echo "GLM run was not explicitly authorized" >&2
+          exit 2
 
       - name: Check out repository
         uses: actions/checkout@v4
@@ -51,59 +73,59 @@ jobs:
       - name: Verify private inputs are configured
         shell: bash
         run: |
-          for name in GLM_API_KEY OPENAI_API_KEY LIN_ZHIYAO_CORPUS_B64; do
+          for name in GLM_API_KEY LIN_ZHIYAO_CORPUS_B64; do
             if [[ -z "${!name}" ]]; then
               echo "$name repository secret is not configured" >&2
               exit 2
             fi
           done
 
-      - name: Run GLM and GPT Native baselines
+      - name: Run three GLM Native baselines
         id: diagnostic
         shell: bash
         run: |
           set +e
           python scripts/cross_model_native_baseline.py \
-            --private-output eng-diag-01-private.json \
-            --blind-output eng-diag-01-blind.json \
-            --public-output eng-diag-01-public.json
+            --private-output eng-diag-01c-private.json \
+            --blind-output eng-diag-01c-blind.json \
+            --public-output eng-diag-01c-public.json
           status=$?
           set -e
           echo "exit_code=$status" >> "$GITHUB_OUTPUT"
-          test -s eng-diag-01-private.json
-          test -s eng-diag-01-blind.json
-          test -s eng-diag-01-public.json
+          test -s eng-diag-01c-private.json
+          test -s eng-diag-01c-blind.json
+          test -s eng-diag-01c-public.json
 
       - name: Encrypt private and blind-review results
         shell: bash
         run: |
           openssl cms -encrypt -binary -aes-256-cbc \
-            -in eng-diag-01-private.json \
+            -in eng-diag-01c-private.json \
             -outform DER \
-            -out eng-diag-01-private.p7m \
+            -out eng-diag-01c-private.p7m \
             .github/keys/lin_zhiyao_baseline_recipient.crt
           openssl cms -encrypt -binary -aes-256-cbc \
-            -in eng-diag-01-blind.json \
+            -in eng-diag-01c-blind.json \
             -outform DER \
-            -out eng-diag-01-blind.p7m \
+            -out eng-diag-01c-blind.p7m \
             .github/keys/lin_zhiyao_baseline_recipient.crt
-          shred -u eng-diag-01-private.json eng-diag-01-blind.json
+          shred -u eng-diag-01c-private.json eng-diag-01c-blind.json
 
       - name: Upload encrypted private results
         uses: actions/upload-artifact@v4
         with:
-          name: eng-diag-01-private-encrypted
+          name: eng-diag-01c-private-encrypted
           path: |
-            eng-diag-01-private.p7m
-            eng-diag-01-blind.p7m
+            eng-diag-01c-private.p7m
+            eng-diag-01c-blind.p7m
           if-no-files-found: error
           retention-days: 3
 
       - name: Upload content-free public evidence
         uses: actions/upload-artifact@v4
         with:
-          name: eng-diag-01-public-evidence
-          path: eng-diag-01-public.json
+          name: eng-diag-01c-public-evidence
+          path: eng-diag-01c-public.json
           if-no-files-found: error
           retention-days: 7
 
