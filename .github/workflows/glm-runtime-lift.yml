@@ -1,0 +1,123 @@
+name: ENG-DIAG-02 GLM-4.7-Flash Runtime Lift Test
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm_glm_run:
+        description: "Type RUN_20_GLM_RUNTIME_CALLS to authorize exactly 20 GLM API calls"
+        required: true
+        type: string
+  pull_request:
+    types: [synchronize]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: eng-diag-02-glm47-runtime-lift-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  glm47-runtime-lift:
+    if: >-
+      (github.event_name == 'workflow_dispatch' &&
+       inputs.confirm_glm_run == 'RUN_20_GLM_RUNTIME_CALLS') ||
+      (github.event_name == 'pull_request' &&
+       github.event.pull_request.number == 5 &&
+       github.event.pull_request.head.ref == 'agent/lin-zhiyao-runtime-v0.2-step02' &&
+       github.event.pull_request.head.repo.full_name == github.repository)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      GLM_API_KEY: ${{ secrets.GLM_API_KEY }}
+      GLM_47_FLASH_MODEL: glm-4.7-flash
+      LIN_ZHIYAO_CORPUS_B64: ${{ secrets.LIN_ZHIYAO_CORPUS_B64 }}
+    steps:
+      - name: Check one-shot authorization
+        shell: bash
+        run: |
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            [[ "${{ inputs.confirm_glm_run }}" == "RUN_20_GLM_RUNTIME_CALLS" ]] && exit 0
+            echo "GLM Runtime run was not explicitly authorized" >&2
+            exit 2
+          fi
+          [[ "${{ github.event.pull_request.number }}" == "5" ]]
+          [[ "${{ github.event.pull_request.head.ref }}" == "agent/lin-zhiyao-runtime-v0.2-step02" ]]
+          [[ "${{ github.event.pull_request.head.repo.full_name }}" == "${{ github.repository }}" ]]
+
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install package
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e .
+
+      - name: Verify private inputs are configured
+        shell: bash
+        run: |
+          for name in GLM_API_KEY LIN_ZHIYAO_CORPUS_B64; do
+            if [[ -z "${!name}" ]]; then
+              echo "$name repository secret is not configured" >&2
+              exit 2
+            fi
+          done
+
+      - name: Run one GLM-4.7-Flash Runtime trajectory
+        id: diagnostic
+        shell: bash
+        run: |
+          set +e
+          python scripts/glm_runtime_lift.py \
+            --private-output eng-diag-02-private.json \
+            --blind-output eng-diag-02-blind.json \
+            --public-output eng-diag-02-public.json
+          status=$?
+          set -e
+          echo "exit_code=$status" >> "$GITHUB_OUTPUT"
+          test -s eng-diag-02-private.json
+          test -s eng-diag-02-blind.json
+          test -s eng-diag-02-public.json
+
+      - name: Encrypt private and blind-review results
+        shell: bash
+        run: |
+          openssl cms -encrypt -binary -aes-256-cbc \
+            -in eng-diag-02-private.json \
+            -outform DER \
+            -out eng-diag-02-private.p7m \
+            .github/keys/lin_zhiyao_baseline_recipient.crt
+          openssl cms -encrypt -binary -aes-256-cbc \
+            -in eng-diag-02-blind.json \
+            -outform DER \
+            -out eng-diag-02-blind.p7m \
+            .github/keys/lin_zhiyao_baseline_recipient.crt
+          shred -u eng-diag-02-private.json eng-diag-02-blind.json
+
+      - name: Upload encrypted private results
+        uses: actions/upload-artifact@v4
+        with:
+          name: eng-diag-02-private-encrypted
+          path: |
+            eng-diag-02-private.p7m
+            eng-diag-02-blind.p7m
+          if-no-files-found: error
+          retention-days: 3
+
+      - name: Upload content-free public evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: eng-diag-02-public-evidence
+          path: eng-diag-02-public.json
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Enforce structural gate
+        shell: bash
+        run: exit "${{ steps.diagnostic.outputs.exit_code }}"
