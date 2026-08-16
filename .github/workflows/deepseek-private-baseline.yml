@@ -1,6 +1,10 @@
 name: DeepSeek Private No-Regression Baseline
 
 on:
+  pull_request:
+    types: [synchronize]
+    paths:
+      - ".github/workflows/deepseek-private-baseline.yml"
   workflow_dispatch:
 
 permissions:
@@ -12,6 +16,7 @@ concurrency:
 
 jobs:
   private-baseline:
+    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     timeout-minutes: 25
     env:
