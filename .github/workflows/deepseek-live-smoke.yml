@@ -1,9 +1,7 @@
 name: DeepSeek Live Smoke
 
 on:
-  push:
-    branches:
-      - agent/lin-zhiyao-runtime-v0.2-step02
+  pull_request:
     paths:
       - ".github/workflows/deepseek-live-smoke.yml"
       - "scripts/deepseek_live_smoke.py"
@@ -20,6 +18,7 @@ concurrency:
 
 jobs:
   live-smoke:
+    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     timeout-minutes: 5
     env:
