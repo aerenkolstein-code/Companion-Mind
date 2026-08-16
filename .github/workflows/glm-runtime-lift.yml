@@ -7,8 +7,6 @@ on:
         description: "Type RUN_20_GLM_RUNTIME_CALLS to authorize exactly 20 GLM API calls"
         required: true
         type: string
-  pull_request:
-    types: [synchronize]
 
 permissions:
   contents: read
@@ -19,13 +17,7 @@ concurrency:
 
 jobs:
   glm47-runtime-lift:
-    if: >-
-      (github.event_name == 'workflow_dispatch' &&
-       inputs.confirm_glm_run == 'RUN_20_GLM_RUNTIME_CALLS') ||
-      (github.event_name == 'pull_request' &&
-       github.event.pull_request.number == 5 &&
-       github.event.pull_request.head.ref == 'agent/lin-zhiyao-runtime-v0.2-step02' &&
-       github.event.pull_request.head.repo.full_name == github.repository)
+    if: inputs.confirm_glm_run == 'RUN_20_GLM_RUNTIME_CALLS'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
@@ -33,17 +25,13 @@ jobs:
       GLM_47_FLASH_MODEL: glm-4.7-flash
       LIN_ZHIYAO_CORPUS_B64: ${{ secrets.LIN_ZHIYAO_CORPUS_B64 }}
     steps:
-      - name: Check one-shot authorization
+      - name: Check manual authorization
         shell: bash
         run: |
-          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
-            [[ "${{ inputs.confirm_glm_run }}" == "RUN_20_GLM_RUNTIME_CALLS" ]] && exit 0
+          if [[ "${{ inputs.confirm_glm_run }}" != "RUN_20_GLM_RUNTIME_CALLS" ]]; then
             echo "GLM Runtime run was not explicitly authorized" >&2
             exit 2
           fi
-          [[ "${{ github.event.pull_request.number }}" == "5" ]]
-          [[ "${{ github.event.pull_request.head.ref }}" == "agent/lin-zhiyao-runtime-v0.2-step02" ]]
-          [[ "${{ github.event.pull_request.head.repo.full_name }}" == "${{ github.repository }}" ]]
 
       - name: Check out repository
         uses: actions/checkout@v4
