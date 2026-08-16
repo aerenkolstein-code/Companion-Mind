@@ -1,0 +1,88 @@
+name: DeepSeek Private 20-Turn Baseline
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/deepseek-private-baseline.yml"
+      - ".github/keys/lin_zhiyao_baseline_recipient.crt"
+      - "scripts/deepseek_private_baseline.py"
+      - "companion_mind/providers/deepseek.py"
+      - "companion_mind/runtime.py"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deepseek-private-baseline-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  private-baseline:
+    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+      DEEPSEEK_MODEL: deepseek-v4-flash
+      LIN_ZHIYAO_CORPUS_B64: ${{ secrets.LIN_ZHIYAO_CORPUS_B64 }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install package
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e .
+
+      - name: Verify private inputs are configured
+        shell: bash
+        run: |
+          if [[ -z "$DEEPSEEK_API_KEY" ]]; then
+            echo "DEEPSEEK_API_KEY repository secret is not configured" >&2
+            exit 2
+          fi
+          if [[ -z "$LIN_ZHIYAO_CORPUS_B64" ]]; then
+            echo "LIN_ZHIYAO_CORPUS_B64 repository secret is not configured" >&2
+            exit 2
+          fi
+
+      - name: Run private 20-turn baseline
+        id: baseline
+        shell: bash
+        run: |
+          set +e
+          python scripts/deepseek_private_baseline.py \
+            --private-output private-result.json
+          status=$?
+          set -e
+          echo "exit_code=$status" >> "$GITHUB_OUTPUT"
+          test -s private-result.json
+
+      - name: Encrypt private result for local review
+        run: |
+          openssl cms -encrypt -binary -aes-256-cbc \
+            -in private-result.json \
+            -outform DER \
+            -out lin-zhiyao-private-baseline.p7m \
+            .github/keys/lin_zhiyao_baseline_recipient.crt
+          shred -u private-result.json
+
+      - name: Upload encrypted result only
+        uses: actions/upload-artifact@v4
+        with:
+          name: lin-zhiyao-private-baseline-encrypted
+          path: lin-zhiyao-private-baseline.p7m
+          if-no-files-found: error
+          retention-days: 3
+
+      - name: Enforce hard-gate result
+        shell: bash
+        run: exit "${{ steps.baseline.outputs.exit_code }}"
+
