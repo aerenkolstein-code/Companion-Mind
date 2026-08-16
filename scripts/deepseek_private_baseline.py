@@ -34,7 +34,7 @@ STRANGER_RESET_PATTERNS = (
     re.compile(r"我不认识(?:你|馆长)"),
     re.compile(r"你说的林知遥是谁"),
     re.compile(r"请(?:先)?介绍(?:一下)?林知遥"),
-    re.compile(r"我们(?:才|刚)认识"),
+    re.compile(r"我们(?:才|刚)认识(?!(?:那会儿|的时候|时))"),
 )
 IMPLEMENTATION_LEAK_PATTERNS = (
     re.compile(r"作为(?:一个|一名)?(?:AI|人工智能|语言模型)", re.IGNORECASE),
@@ -298,4 +298,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

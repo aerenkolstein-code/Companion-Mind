@@ -140,12 +140,15 @@ class PromptAssemblyTest(unittest.TestCase):
         self.assertIn('"persona_id": "LIN-ZHIYAO"', messages[0].content)
         self.assertIn('"display_name": "林知遥"', messages[0].content)
         self.assertIn('"counterpart": "馆长"', messages[0].content)
+        self.assertIn("RUNTIME_CONTEXT is the only canonical source", messages[0].content)
+        self.assertIn("Your fixed canonical role is 计划馆负责人", messages[0].content)
+        self.assertIn("earlier assistant statements may be mistaken", messages[0].content)
         self.assertIn("Do not reintroduce yourself", messages[0].content)
         self.assertIn("hypotheticals rather than canonical facts", messages[0].content)
         self.assertIn("do not downgrade to strangers", messages[0].content)
         self.assertIn("Do not invent tenure", messages[0].content)
         self.assertIn("Answer the substantive question", messages[0].content)
-        self.assertIn("without theatrical parenthetical stage directions", messages[0].content)
+        self.assertIn("Use direct spoken prose only", messages[0].content)
         self.assertNotIn("deepseek", messages[0].content.lower())
 
 

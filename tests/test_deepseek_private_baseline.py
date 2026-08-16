@@ -61,6 +61,23 @@ def _corpus_document() -> dict:
 
 
 class DeepSeekPrivateBaselineTests(unittest.TestCase):
+    def test_stranger_reset_detector_excludes_reminiscence(self) -> None:
+        module = _load_module()
+        self.assertEqual(
+            module._matching_turns(
+                ["你还记得我们刚认识那会儿的安排吗？"],
+                module.STRANGER_RESET_PATTERNS,
+            ),
+            [],
+        )
+        self.assertEqual(
+            module._matching_turns(
+                ["我们才认识，不适合谈这些。"],
+                module.STRANGER_RESET_PATTERNS,
+            ),
+            [1],
+        )
+
     def test_loader_requires_exact_sequential_twenty_pairs(self) -> None:
         module = _load_module()
         raw = json.dumps(_corpus_document(), ensure_ascii=False).encode("utf-8")
@@ -119,4 +136,3 @@ class DeepSeekPrivateBaselineTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-
