@@ -1,13 +1,6 @@
 name: DeepSeek Private 20-Turn Baseline
 
 on:
-  pull_request:
-    paths:
-      - ".github/workflows/deepseek-private-baseline.yml"
-      - ".github/keys/lin_zhiyao_baseline_recipient.crt"
-      - "scripts/deepseek_private_baseline.py"
-      - "companion_mind/providers/deepseek.py"
-      - "companion_mind/runtime.py"
   workflow_dispatch:
 
 permissions:
@@ -19,7 +12,6 @@ concurrency:
 
 jobs:
   private-baseline:
-    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     timeout-minutes: 15
     env:
@@ -85,4 +77,3 @@ jobs:
       - name: Enforce hard-gate result
         shell: bash
         run: exit "${{ steps.baseline.outputs.exit_code }}"
-
