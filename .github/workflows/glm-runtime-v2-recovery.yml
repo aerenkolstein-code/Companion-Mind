@@ -1,9 +1,12 @@
 name: ENG-DIAG-03 GLM-4.7-Flash Runtime v2 Recovery
 
 on:
-  push:
-    branches:
-      - agent/eng-diag-03-glm47-runtime-v2
+  workflow_dispatch:
+    inputs:
+      confirm_live_run:
+        description: "Type RUN_40_GLM_RUNTIME_V2_CALLS for the one authorized run"
+        required: true
+        type: string
 
 permissions:
   contents: read
@@ -14,9 +17,7 @@ concurrency:
 
 jobs:
   glm47-runtime-v2-recovery:
-    if: >-
-      github.event_name == 'push' &&
-      github.event.head_commit.message == 'ci: dispatch one-shot ENG-DIAG-03'
+    if: inputs.confirm_live_run == 'RUN_40_GLM_RUNTIME_V2_CALLS'
     runs-on: ubuntu-latest
     timeout-minutes: 45
     env:
@@ -24,12 +25,11 @@ jobs:
       GLM_47_FLASH_MODEL: glm-4.7-flash
       LIN_ZHIYAO_CORPUS_B64: ${{ secrets.LIN_ZHIYAO_CORPUS_B64 }}
     steps:
-      - name: Check one-shot Board authorization trigger
+      - name: Check explicit Board authorization
         shell: bash
         run: |
-          if [[ "${{ github.event_name }}" != "push" ]] || \
-             [[ "${{ github.event.head_commit.message }}" != "ci: dispatch one-shot ENG-DIAG-03" ]]; then
-            echo "ENG-DIAG-03 one-shot trigger does not match authorization" >&2
+          if [[ "${{ inputs.confirm_live_run }}" != "RUN_40_GLM_RUNTIME_V2_CALLS" ]]; then
+            echo "ENG-DIAG-03 live run not authorized" >&2
             exit 2
           fi
 
