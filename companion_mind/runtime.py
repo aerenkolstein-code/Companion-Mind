@@ -54,12 +54,13 @@ class Runtime:
         personas_dir: str | Path = "personas",
         state_dir: str | Path = "data/state",
         raw_dir: str | Path = "data/raw",
+        history_limit: int | None = None,
         session_id_factory: Callable[[], UUID] = uuid4,
     ) -> None:
         self.persona_loader = PersonaLoader(personas_dir)
         self.state_store = JsonStateStore(state_dir)
         self.raw_writer = UnifiedRawWriter(raw_dir)
-        self.prompt_assembler = PromptAssembler()
+        self.prompt_assembler = PromptAssembler(history_limit=history_limit)
         self.session_id_factory = session_id_factory
         self.current_state: RuntimeState | None = None
 
@@ -119,6 +120,17 @@ class Runtime:
         state = self.current_state
         turn_index = state.session.turn_index + 1
         history = self.raw_writer.read(state.session.session_id)
+        attempt_index = (
+            max(
+                (
+                    event.attempt_index
+                    for event in history
+                    if event.turn_index == turn_index
+                ),
+                default=0,
+            )
+            + 1
+        )
         messages = self.prompt_assembler.assemble(
             state,
             content,
@@ -130,7 +142,9 @@ class Runtime:
             persona_id=state.persona.persona_id,
             universe=state.persona.universe,
             role="user",
+            attempt_index=attempt_index,
             route_state=state.session.active_route,
+            route_reason="provider_attempt",
             content=content,
         )
         self.raw_writer.append(user_event)
@@ -144,6 +158,7 @@ class Runtime:
                     persona_id=state.persona.persona_id,
                     universe=state.persona.universe,
                     role="runtime",
+                    attempt_index=attempt_index,
                     provider=provider.name,
                     model=provider.model,
                     route_state=state.session.active_route,
@@ -162,6 +177,7 @@ class Runtime:
                     persona_id=state.persona.persona_id,
                     universe=state.persona.universe,
                     role="runtime",
+                    attempt_index=attempt_index,
                     provider=provider.name,
                     model=provider.model,
                     route_state=state.session.active_route,
@@ -179,6 +195,7 @@ class Runtime:
                 persona_id=state.persona.persona_id,
                 universe=state.persona.universe,
                 role="assistant",
+                attempt_index=attempt_index,
                 provider=response.provider,
                 model=response.model,
                 route_state=state.session.active_route,

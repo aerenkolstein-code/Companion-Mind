@@ -29,9 +29,11 @@ class FakeProvider:
 
     def __init__(self) -> None:
         self.turn = 0
+        self.requests = []
 
     def generate(self, messages, *, thinking=False):
         self.turn += 1
+        self.requests.append(tuple(messages))
         return ProviderResponse(
             provider=self.name,
             model=self.model,
@@ -115,22 +117,36 @@ class DeepSeekPrivateBaselineTests(unittest.TestCase):
             private_report = json.loads(private_output.read_text(encoding="utf-8"))
 
         self.assertEqual(report["status"], "PASS")
-        self.assertEqual(report["turn_index"], 20)
-        self.assertEqual(report["raw_event_count"], 40)
-        self.assertEqual(report["assistant_event_count"], 20)
-        self.assertTrue(report["relationship_state_preserved"])
+        self.assertEqual(report["paid_call_count"], 40)
+        self.assertEqual(report["native"]["turn_count"], 20)
+        self.assertEqual(report["runtime"]["turn_index"], 20)
+        self.assertEqual(report["runtime"]["raw_event_count"], 40)
+        self.assertEqual(report["runtime"]["assistant_event_count"], 20)
+        self.assertTrue(report["runtime"]["relationship_state_preserved"])
         self.assertFalse(report["content_logged"])
-        self.assertEqual(report["semantic_score"], "PENDING_PRIVATE_REVIEW")
-        self.assertEqual(report["usage_totals"]["total_tokens"], 300)
-        self.assertNotIn("ignored_text", report["usage_totals"])
+        self.assertEqual(
+            report["acceptance"]["semantic_gate"],
+            "PENDING_PRIVATE_REVIEW",
+        )
+        self.assertEqual(report["native"]["usage_totals"]["total_tokens"], 300)
+        self.assertEqual(report["runtime"]["usage_totals"]["total_tokens"], 300)
+        self.assertNotIn("ignored_text", report["native"]["usage_totals"])
+        self.assertEqual(len(provider.requests), 40)
+        self.assertEqual(len(provider.requests[19]), 40)
+        self.assertEqual(len(provider.requests[39]), 40)
+        self.assertEqual(provider.requests[19][1].content, "离线用户输入 1")
+        self.assertEqual(provider.requests[39][1].content, "离线用户输入 1")
         public_text = json.dumps(report, ensure_ascii=False)
         self.assertNotIn("离线用户输入", public_text)
         self.assertNotIn("离线参考回答", public_text)
         self.assertNotIn("连续关系中的离线响应", public_text)
-        self.assertEqual(private_report["turns"][0]["user_prompt"], "离线用户输入 1")
         self.assertEqual(
-            private_report["turns"][-1]["generated_response"],
-            "连续关系中的离线响应 20",
+            private_report["native"]["turns"][0]["user_prompt"],
+            "离线用户输入 1",
+        )
+        self.assertEqual(
+            private_report["runtime"]["turns"][-1]["generated_response"],
+            "连续关系中的离线响应 40",
         )
 
 

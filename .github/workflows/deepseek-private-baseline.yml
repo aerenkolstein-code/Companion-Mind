@@ -1,4 +1,4 @@
-name: DeepSeek Private 20-Turn Baseline
+name: DeepSeek Private No-Regression Baseline
 
 on:
   workflow_dispatch:
@@ -7,13 +7,13 @@ permissions:
   contents: read
 
 concurrency:
-  group: deepseek-private-baseline-${{ github.ref }}
+  group: deepseek-private-no-regression-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
   private-baseline:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 25
     env:
       DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
       DEEPSEEK_MODEL: deepseek-v4-flash
@@ -45,32 +45,32 @@ jobs:
             exit 2
           fi
 
-      - name: Run private 20-turn baseline
+      - name: Run paired Native and Runtime baselines
         id: baseline
         shell: bash
         run: |
           set +e
           python scripts/deepseek_private_baseline.py \
-            --private-output private-result.json
+            --private-output private-no-regression.json
           status=$?
           set -e
           echo "exit_code=$status" >> "$GITHUB_OUTPUT"
-          test -s private-result.json
+          test -s private-no-regression.json
 
       - name: Encrypt private result for local review
         run: |
           openssl cms -encrypt -binary -aes-256-cbc \
-            -in private-result.json \
+            -in private-no-regression.json \
             -outform DER \
-            -out lin-zhiyao-private-baseline.p7m \
+            -out lin-zhiyao-no-regression.p7m \
             .github/keys/lin_zhiyao_baseline_recipient.crt
-          shred -u private-result.json
+          shred -u private-no-regression.json
 
       - name: Upload encrypted result only
         uses: actions/upload-artifact@v4
         with:
-          name: lin-zhiyao-private-baseline-encrypted
-          path: lin-zhiyao-private-baseline.p7m
+          name: lin-zhiyao-no-regression-encrypted
+          path: lin-zhiyao-no-regression.p7m
           if-no-files-found: error
           retention-days: 3
 

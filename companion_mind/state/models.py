@@ -59,6 +59,7 @@ class RawEvent(RuntimeModel):
     persona_id: str = Field(min_length=1)
     universe: str = Field(min_length=1)
     role: RawRole
+    attempt_index: int = Field(default=1, ge=1)
     provider: str | None = None
     model: str | None = None
     route_state: RouteState = "NORMAL"

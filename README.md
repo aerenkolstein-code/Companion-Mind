@@ -11,7 +11,7 @@
 | Baseline accuracy | 20% |
 | With Closure Guard | 100% |
 | Known regression failures caught | 4/4 |
-| Runtime tests | 40/40 |
+| Runtime tests | 47/47 |
 | Live / replay snapshot | Exact match |
 | MitigationSpec contract | Validated + fingerprinted |
 
@@ -67,7 +67,7 @@ companion-mind validate-mitigation --mitigation-spec /tmp/mitigation.json
 companion-mind demo --mitigation-spec /tmp/mitigation.json
 ```
 
-## LIN-ZHIYAO Runtime v0.2 — Steps 01–02
+## LIN-ZHIYAO Runtime v0.2 — Steps 01–02.1
 
 The repository now includes the provider-independent skeleton for the
 cross-model persona-continuity experiment. `LIN-ZHIYAO` is loaded from a
@@ -93,6 +93,9 @@ adapter, deterministic prompt assembly, strict response parsing, and an
 append-only Unified RAW writer. The offline baseline runs 20 consecutive
 NORMAL-to-ROMANTIC turns through an injected transport and preserves one
 `persona_id`, `session_id`, state timeline, and provider/model provenance.
+Step 02.1 removes fixed history eviction for the bounded 20-turn experiment,
+keeps failed provider attempts in RAW without replaying them as duplicate
+dialogue evidence, and adds a paired Native-versus-Runtime no-regression runner.
 
 ```python
 from companion_mind import DeepSeekConfig, DeepSeekProvider
@@ -132,7 +135,7 @@ later gated steps.
 - guarded accuracy: **100%**;
 - premature closure rate: **100% → 0%**;
 - known recurrence variants caught: **4/4**;
-- runtime unit tests: **40/40**;
+- runtime unit tests: **47/47**;
 - live snapshot versus clean replay: **exact match**;
 - replayed public demo events: **5/5**.
 

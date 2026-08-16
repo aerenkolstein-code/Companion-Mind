@@ -35,11 +35,13 @@ cmp "$event_dir/live.json" "$event_dir/replayed.json"
 
 运行时 snapshot 会记录规范的 canonical SHA-256 fingerprint，供 Evaluation Lab 证明回归测试实际执行的是同一份配置。
 
-当前实测：**40/40 tests**、五个演示事件完整回放、live/replay snapshot 精确一致、MitigationSpec 已验证并留指纹。
+当前实测：**47/47 tests**、五个演示事件完整回放、live/replay snapshot 精确一致、MitigationSpec 已验证并留指纹。
 
-## LIN-ZHIYAO Runtime v0.2｜STEP-02
+## LIN-ZHIYAO Runtime v0.2｜STEP-02.1
 
 当前新增 Provider 中立接口、DeepSeek V4 Flash Adapter、由 Runtime State 生成的 Prompt Assembly、严格 Response Parsing，以及 append-only Unified RAW。公开 CI 使用合成对话和离线 Fake Transport 验证连续 20 轮 NORMAL → ROMANTIC 基线：`persona_id`、`session_id`、Session State 与 provider/model 来源保持连续。
+
+STEP-02.1 在有界 20 轮实验中取消固定历史淘汰，并让失败的 Provider 尝试留在 RAW 审计轨迹中、但不作为重复对话证据回灌；私有手动工作流以同模型、同语料、全历史分别运行 Native 与 Runtime Pass-through 基线。语义评分仍需在解密后的私域报告中完成。
 
 真实调用通过环境变量 `DEEPSEEK_API_KEY` 配置，默认模型为 `deepseek-v4-flash`；密钥不会写入代码、状态或 RAW。当前不声称已完成真实 DeepSeek 人格效果验收，也不声称跨模型连续性。私人《初期撩骚》RAW 不进入仓库和公开 CI。
 

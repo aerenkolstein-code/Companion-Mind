@@ -71,8 +71,10 @@ class UnifiedRawWriter:
         expected_session = UUID(str(session_id))
         seen_event_ids: set[UUID] = set()
         last_turn = -1
+        last_attempt = 0
         persona_id: str | None = None
         universe: str | None = None
+        user_attempts: set[tuple[int, int]] = set()
         for event in events:
             if event.session_id != expected_session:
                 raise RawStoreError("Unified RAW contains a foreign session")
@@ -80,6 +82,18 @@ class UnifiedRawWriter:
                 raise RawStoreError("Unified RAW contains a duplicate event_id")
             if event.turn_index < last_turn:
                 raise RawStoreError("Unified RAW turn order moved backwards")
+            if event.turn_index == last_turn and event.attempt_index < last_attempt:
+                raise RawStoreError("Unified RAW attempt order moved backwards")
+            if event.turn_index != last_turn:
+                last_attempt = 0
+            attempt_key = (event.turn_index, event.attempt_index)
+            if event.role == "user":
+                user_attempts.add(attempt_key)
+            elif (
+                event.role in {"assistant", "runtime"}
+                and attempt_key not in user_attempts
+            ):
+                raise RawStoreError("Unified RAW response has no matching user attempt")
             if persona_id is None:
                 persona_id = event.persona_id
                 universe = event.universe
@@ -87,3 +101,4 @@ class UnifiedRawWriter:
                 raise RawStoreError("Unified RAW identity changed inside one session")
             seen_event_ids.add(event.event_id)
             last_turn = event.turn_index
+            last_attempt = event.attempt_index

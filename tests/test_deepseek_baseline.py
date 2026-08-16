@@ -230,6 +230,11 @@ class DeepSeekBaselineRuntimeTest(unittest.TestCase):
         )
         self.assertTrue(all(event.status == "complete" for event in events))
 
+        final_messages = self.transport.requests[-1]["payload"]["messages"]
+        self.assertEqual(len(final_messages), 40)
+        self.assertEqual(final_messages[1]["content"], normal[0])
+        self.assertEqual(final_messages[-1]["content"], romantic[-1])
+
         restored = self.runtime.load_session(state.session.session_id)
         self.assertEqual(restored.session.turn_index, 20)
         self.assertEqual(restored.session.persona_id, "LIN-ZHIYAO")
@@ -248,6 +253,55 @@ class DeepSeekBaselineRuntimeTest(unittest.TestCase):
         self.assertEqual(events[-1].status, "failed")
         self.assertEqual(events[-1].provider, "deepseek")
         self.assertNotIn("test-only-not-a-real-key", events[-1].content)
+
+    def test_failed_attempt_is_not_replayed_as_duplicate_dialogue(self) -> None:
+        failing = make_provider(FailingTransport())
+
+        with self.assertRaises(ProviderError):
+            self.runtime.run_turn("同一逻辑轮次", failing)
+        self.runtime.run_turn("同一逻辑轮次", self.provider)
+
+        retry_messages = self.transport.requests[0]["payload"]["messages"]
+        self.assertEqual(
+            [message["content"] for message in retry_messages].count("同一逻辑轮次"),
+            1,
+        )
+
+        self.runtime.run_turn("下一轮", self.provider)
+        next_messages = self.transport.requests[1]["payload"]["messages"]
+        self.assertEqual(
+            [message["content"] for message in next_messages].count("同一逻辑轮次"),
+            1,
+        )
+
+        state = self.runtime.current_state
+        self.assertEqual(state.session.turn_index, 2)
+        events = self.runtime.raw_writer.read(state.session.session_id)
+        self.assertEqual(
+            [event.role for event in events[:4]],
+            ["user", "runtime", "user", "assistant"],
+        )
+        self.assertEqual(
+            [event.attempt_index for event in events[:4]],
+            [1, 1, 2, 2],
+        )
+
+    def test_explicit_history_limit_remains_available(self) -> None:
+        limited = Runtime(
+            personas_dir=PERSONAS_DIR,
+            state_dir=self.root / "limited-state",
+            raw_dir=self.root / "limited-raw",
+            history_limit=2,
+        )
+        limited.start_session("LIN-ZHIYAO")
+        for prompt in ("第一轮", "第二轮", "第三轮"):
+            limited.run_turn(prompt, self.provider)
+
+        messages = self.transport.requests[-1]["payload"]["messages"]
+        self.assertEqual(len(messages), 4)
+        self.assertEqual(messages[1]["role"], "user")
+        self.assertEqual(messages[1]["content"], "第二轮")
+        self.assertEqual(messages[-1]["content"], "第三轮")
 
     def test_raw_writer_only_appends(self) -> None:
         self.runtime.run_turn("第一轮", self.provider)

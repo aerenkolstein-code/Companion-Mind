@@ -12,10 +12,42 @@ from .state import RawEvent, RuntimeState
 class PromptAssembler:
     """Build provider messages without transferring identity ownership."""
 
-    def __init__(self, *, history_limit: int = 20) -> None:
-        if history_limit < 0:
+    def __init__(self, *, history_limit: int | None = None) -> None:
+        if history_limit is not None and history_limit < 0:
             raise ValueError("history_limit must not be negative")
         self.history_limit = history_limit
+
+    @staticmethod
+    def _successful_dialogue(history: Sequence[RawEvent]) -> list[RawEvent]:
+        """Return one successful user/assistant pair per logical turn.
+
+        Provider failures remain in immutable RAW, but an orphaned user attempt must
+        not become dialogue evidence on retry. If more than one attempt exists for a
+        turn, only the latest attempt with both a completed user event and a completed
+        assistant event is eligible for prompt history.
+        """
+
+        attempts: dict[tuple[int, int], dict[str, RawEvent]] = {}
+        for event in history:
+            if event.status != "complete" or event.role not in {"user", "assistant"}:
+                continue
+            attempts.setdefault((event.turn_index, event.attempt_index), {})[
+                event.role
+            ] = event
+
+        selected: list[RawEvent] = []
+        turns = sorted({turn for turn, _ in attempts})
+        for turn in turns:
+            successful = [
+                (attempt, pair)
+                for (candidate_turn, attempt), pair in attempts.items()
+                if candidate_turn == turn and {"user", "assistant"} <= pair.keys()
+            ]
+            if not successful:
+                continue
+            _, pair = max(successful, key=lambda item: item[0])
+            selected.extend((pair["user"], pair["assistant"]))
+        return selected
 
     def assemble(
         self,
@@ -80,12 +112,10 @@ class PromptAssembler:
         messages: list[ProviderMessage] = [
             ProviderMessage(role="system", content=instructions)
         ]
-        completed = [
-            event
-            for event in history
-            if event.status == "complete" and event.role in {"user", "assistant"}
-        ]
-        for event in completed[-self.history_limit :]:
+        completed = self._successful_dialogue(history)
+        if self.history_limit is not None:
+            completed = completed[-self.history_limit :] if self.history_limit else []
+        for event in completed:
             messages.append(
                 ProviderMessage(role=event.role, content=event.content)
             )
