@@ -24,17 +24,25 @@ from .models import (
     StateDelta,
 )
 from .persona import PersonaLoader
+from .observer import NullStateObserver, StateObserver
 from .prompt import PromptAssembler
 from .providers import ChatProvider, ProviderError, ProviderResponse
 from .raw import UnifiedRawWriter
 from .state import (
     ConversationState,
+    DeterministicStateReducer,
     JsonStateStore,
+    JsonlDeltaStore,
+    ObserverInput,
     RawEvent,
     RelationshipState,
     RuntimeState,
     SessionState,
+    StableCore,
+    StateDeltaCandidate,
+    replay_runtime_state,
 )
+from .state.transitions import ConfidenceThreshold
 
 
 class EventLogError(ValueError):
@@ -54,13 +62,21 @@ class Runtime:
         personas_dir: str | Path = "personas",
         state_dir: str | Path = "data/state",
         raw_dir: str | Path = "data/raw",
+        delta_dir: str | Path = "data/deltas",
         history_limit: int | None = None,
+        state_observer: StateObserver | None = None,
+        observer_confidence_threshold: ConfidenceThreshold = "high",
         session_id_factory: Callable[[], UUID] = uuid4,
     ) -> None:
         self.persona_loader = PersonaLoader(personas_dir)
         self.state_store = JsonStateStore(state_dir)
         self.raw_writer = UnifiedRawWriter(raw_dir)
+        self.delta_store = JsonlDeltaStore(delta_dir)
         self.prompt_assembler = PromptAssembler(history_limit=history_limit)
+        self.state_observer = state_observer or NullStateObserver()
+        self.state_reducer = DeterministicStateReducer(
+            confidence_threshold=observer_confidence_threshold
+        )
         self.session_id_factory = session_id_factory
         self.current_state: RuntimeState | None = None
 
@@ -71,6 +87,7 @@ class Runtime:
         now = datetime.now(timezone.utc)
         state = RuntimeState(
             persona=persona,
+            stable_core=StableCore.from_persona(persona),
             session=SessionState(
                 session_id=self.session_id_factory(),
                 persona_id=persona.persona_id,
@@ -188,21 +205,65 @@ class Runtime:
             )
             raise mismatch
 
-        self.raw_writer.append(
-            RawEvent(
-                session_id=state.session.session_id,
-                turn_index=turn_index,
-                persona_id=state.persona.persona_id,
-                universe=state.persona.universe,
-                role="assistant",
-                attempt_index=attempt_index,
-                provider=response.provider,
-                model=response.model,
-                route_state=state.session.active_route,
-                route_reason="runtime_default",
-                content=response.content,
-            )
+        assistant_event = RawEvent(
+            session_id=state.session.session_id,
+            turn_index=turn_index,
+            persona_id=state.persona.persona_id,
+            universe=state.persona.universe,
+            role="assistant",
+            attempt_index=attempt_index,
+            provider=response.provider,
+            model=response.model,
+            route_state=state.session.active_route,
+            route_reason="runtime_default",
+            content=response.content,
         )
+        self.raw_writer.append(assistant_event)
+
+        observer_input = ObserverInput(
+            stable_core=state.stable_core,
+            previous_conversation=state.conversation,
+            previous_relationship=state.relationship,
+            user_event=user_event,
+            assistant_event=assistant_event,
+        )
+        transition_state = state
+        try:
+            proposed = self.state_observer.observe(observer_input)
+            candidate = StateDeltaCandidate.model_validate(proposed)
+        except Exception as exc:
+            observer_name = str(
+                getattr(self.state_observer, "name", "state-observer")
+            ).strip() or "state-observer"
+            observer_model = str(
+                getattr(self.state_observer, "model", "unknown-observer")
+            ).strip() or "unknown-observer"
+            self.raw_writer.append(
+                RawEvent(
+                    session_id=state.session.session_id,
+                    turn_index=turn_index,
+                    persona_id=state.persona.persona_id,
+                    universe=state.persona.universe,
+                    role="runtime",
+                    attempt_index=attempt_index,
+                    provider=observer_name,
+                    model=observer_model,
+                    route_state=state.session.active_route,
+                    route_reason="state_observer_error",
+                    content=f"{type(exc).__name__}: observer call failed",
+                    status="failed",
+                )
+            )
+        else:
+            transition = self.state_reducer.reduce(
+                state,
+                candidate,
+                user_event=user_event,
+                assistant_event=assistant_event,
+            )
+            self.delta_store.append_many(transition.records)
+            transition_state = transition.state
+
         updated_session = state.session.model_copy(
             update={
                 "active_provider": response.provider,
@@ -210,14 +271,24 @@ class Runtime:
                 "turn_index": turn_index,
             }
         )
-        self.current_state = state.model_copy(
+        self.current_state = transition_state.model_copy(
             update={
                 "session": updated_session,
-                "updated_at": datetime.now(timezone.utc),
+                "updated_at": assistant_event.created_at,
             }
         )
         self.state_store.save(self.current_state)
         return response
+
+    def replay_session(self, initial_state: RuntimeState) -> RuntimeState:
+        """Reconstruct a session from S0, Unified RAW, and the delta journal."""
+
+        session_id = initial_state.session.session_id
+        return replay_runtime_state(
+            initial_state,
+            self.raw_writer.read(session_id),
+            self.delta_store.read(session_id),
+        )
 
 
 def _required_text(value: Mapping[str, Any], key: str) -> str:

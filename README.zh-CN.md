@@ -24,8 +24,8 @@ Portfolio Status：**CURRENT ARTIFACT** · Evidence Level：**E3——可运行�
 当前纵切保留 append-only JSONL、State/Agenda 重建与确定性 Replay，并新增 `mitigation-spec/v1` 加载。Evaluation Lab 产出的 JSON 规范经过版本、目标错误、Guard 类型、决策映射和状态集合校验后，才注册为 `CM-GUARD-001`；不支持或含糊的规范直接失败关闭。
 
 ```bash
-python -m pip install -e .
-python -m unittest discover -s tests -v
+python -m pip install -e ".[dev]"
+python -m pytest -q
 
 event_dir="$(mktemp -d)"
 companion-mind demo --event-log "$event_dir/events.jsonl" > "$event_dir/live.json"
@@ -35,14 +35,18 @@ cmp "$event_dir/live.json" "$event_dir/replayed.json"
 
 运行时 snapshot 会记录规范的 canonical SHA-256 fingerprint，供 Evaluation Lab 证明回归测试实际执行的是同一份配置。
 
-当前实测：**47/47 tests**、五个演示事件完整回放、live/replay snapshot 精确一致、MitigationSpec 已验证并留指纹。
+当前实测：**66/66 tests**、五个演示事件完整回放、live/replay snapshot 精确一致、MitigationSpec 已验证并留指纹。
 
-## LIN-ZHIYAO Runtime v0.2｜STEP-02.1
+## LIN-ZHIYAO Runtime v0.2｜STEP-02.2
 
 当前新增 Provider 中立接口、DeepSeek V4 Flash Adapter、由 Runtime State 生成的 Prompt Assembly、严格 Response Parsing，以及 append-only Unified RAW。公开 CI 使用合成对话和离线 Fake Transport 验证连续 20 轮 NORMAL → ROMANTIC 基线：`persona_id`、`session_id`、Session State 与 provider/model 来源保持连续。
 
 STEP-02.1 在有界 20 轮实验中取消固定历史淘汰，并让失败的 Provider 尝试留在 RAW 审计轨迹中、但不作为重复对话证据回灌；私有手动工作流以同模型、同语料、全历史分别运行 Native 与 Runtime Pass-through 基线。语义评分仍需在解密后的私域报告中完成。
 
-真实调用通过环境变量 `DEEPSEEK_API_KEY` 配置，默认模型为 `deepseek-v4-flash`；密钥不会写入代码、状态或 RAW。当前不声称已完成真实 DeepSeek 人格效果验收，也不声称跨模型连续性。私人《初期撩骚》RAW 不进入仓库和公开 CI。
+STEP-02.2 引入 Runtime Contract v2，但不改变任何 live-model lane。身份与既有亲密关系写入不可变 `StableCore`；尚未观察到的 Current State 使用 UNKNOWN 语义，不再用空字符串冒充“已知为空”。可替换的逐轮 State Observer 只能提出带本轮 RAW 证据的中期状态候选；确定性 Reducer 再按字段白名单、操作、类型、证据、置信度、轮次与容量上限逐项验收。接受和拒绝的决定均追加到独立 delta journal，且 `S0 + Unified RAW + accepted deltas` 能精确重放最终 Runtime State。
 
-当前边界：已实现模型 API Adapter，但公开验收不调用付费模型；无 Grok、无跨模型 Handoff、无事务数据库、不证明 AI 意识，也不公开私人档案。以上只证明当前公开夹具与本地原型的可执行集成。
+Prompt Contract v2 在本次有界实验中保留完整成功对话，把对话视为直接互动证据，只输出已知 Current State 字段，并仅在明确的身份或关系矛盾时由 Stable Core 覆盖。离线 Gate A–H 使用脚本化或空 Observer，覆盖工程话题、亲密话题、身份与关系核心篡改拒绝、关系无关轮次、Observer 故障隔离、UNKNOWN 语义和精确重放。
+
+真实调用通过环境变量 `DEEPSEEK_API_KEY` 配置，默认模型为 `deepseek-v4-flash`；密钥不会写入代码、状态或 RAW。当前不声称已完成真实 DeepSeek 人格效果验收，也不声称跨模型连续性。私人历史 RAW 不进入仓库和公开 CI。
+
+当前边界：本工单不授权 `ENG-DIAG-03`，不调用任何 live/付费模型；已实现模型 API Adapter，但无 Grok、无跨模型 Handoff、无事务数据库、不证明 AI 意识，也不公开私人档案。以上只证明当前公开夹具与本地原型的可执行集成。

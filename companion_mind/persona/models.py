@@ -19,6 +19,9 @@ class PersonaIdentity(FrozenModel):
 class PersonaRelationship(FrozenModel):
     counterpart_id: str = Field(min_length=1)
     counterpart: str = Field(min_length=1)
+    relationship_class: str = Field(
+        pattern="^established_romantic_relationship$"
+    )
     status: str = Field(pattern="^current$")
     closeness: str = Field(pattern="^runtime_managed$")
 

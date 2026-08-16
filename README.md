@@ -11,7 +11,7 @@
 | Baseline accuracy | 20% |
 | With Closure Guard | 100% |
 | Known regression failures caught | 4/4 |
-| Runtime tests | 47/47 |
+| Runtime tests | 66/66 |
 | Live / replay snapshot | Exact match |
 | MitigationSpec contract | Validated + fingerprinted |
 
@@ -40,8 +40,8 @@ with the package; no API key is required for the current reproducible demos or
 the offline provider-contract tests.
 
 ```bash
-python -m pip install -e .
-python -m unittest discover -s tests -v
+python -m pip install -e ".[dev]"
+python -m pytest -q
 
 event_dir="$(mktemp -d)"
 companion-mind demo --event-log "$event_dir/events.jsonl" > "$event_dir/live.json"
@@ -67,7 +67,7 @@ companion-mind validate-mitigation --mitigation-spec /tmp/mitigation.json
 companion-mind demo --mitigation-spec /tmp/mitigation.json
 ```
 
-## LIN-ZHIYAO Runtime v0.2 — Steps 01–02.1
+## LIN-ZHIYAO Runtime v0.2 — Steps 01–02.2
 
 The repository now includes the provider-independent skeleton for the
 cross-model persona-continuity experiment. `LIN-ZHIYAO` is loaded from a
@@ -97,6 +97,24 @@ Step 02.1 removes fixed history eviction for the bounded 20-turn experiment,
 keeps failed provider attempts in RAW without replaying them as duplicate
 dialogue evidence, and adds a paired Native-versus-Runtime no-regression runner.
 
+Step 02.2 introduces Runtime Contract v2 without changing any live-model lane.
+Identity and the established relationship are held in an immutable `StableCore`;
+unobserved Current State is represented as unknown rather than as empty or
+negative evidence. A replaceable turn-level State Observer may propose only
+evidence-linked medium-term changes. A deterministic reducer validates a strict
+field allowlist, operation, type, evidence, confidence, turn index, and size cap
+before writing. Accepted and rejected decisions are appended to a separate
+delta journal, and `S0 + Unified RAW + accepted deltas` replays to the exact
+final Runtime State.
+
+Prompt Contract v2 keeps the complete successful dialogue in this bounded
+experiment, treats that dialogue as direct interaction evidence, emits only
+known Current State fields, and uses the Stable Core only for explicit identity
+or relationship contradictions. Gates A–H run offline with scripted or empty
+observers. They cover engineering-only and affectionate turns, identity and
+relationship mutation rejection, relationship-irrelevant dialogue, observer
+failure isolation, unknown-state semantics, and exact replay.
+
 ```python
 from companion_mind import DeepSeekConfig, DeepSeekProvider
 
@@ -109,10 +127,10 @@ For a live call, set `DEEPSEEK_API_KEY`; the optional `DEEPSEEK_MODEL` defaults
 to `deepseek-v4-flash`. Credentials are never written to state or Unified RAW.
 The repository does **not** contain a key and CI never makes a paid model call.
 
-This step does not connect Grok and does not claim live-model effectiveness or
-cross-model continuity. The private historical RAW is also excluded from the
-repository and public CI. Handoff, return, routing, and blind evaluation remain
-later gated steps.
+This step does not authorize `ENG-DIAG-03`, make live model calls, connect Grok,
+or claim live-model effectiveness or cross-model continuity. The private
+historical RAW is also excluded from the repository and public CI. Handoff,
+return, routing, and blind evaluation remain later gated steps.
 
 ## Evidence boundary
 
@@ -122,6 +140,9 @@ later gated steps.
 - append-only, fsynced JSONL event persistence;
 - state-backed active agenda separated from prose;
 - deterministic replay of state, agenda, deltas, and decision traces;
+- immutable Runtime v2 Stable Core and explicit unknown Current State semantics;
+- replaceable turn-level State Observer boundary with deterministic validation;
+- append-only accepted/rejected state-delta journal and exact state replay;
 - validated `mitigation-spec/v1` loading and canonical fingerprinting;
 - spec-configured Closure Guard registration;
 - provenance-bearing `BeliefCandidate` and `DecisionTrace` records;
@@ -135,7 +156,7 @@ later gated steps.
 - guarded accuracy: **100%**;
 - premature closure rate: **100% → 0%**;
 - known recurrence variants caught: **4/4**;
-- runtime unit tests: **47/47**;
+- runtime unit tests: **66/66**;
 - live snapshot versus clean replay: **exact match**;
 - replayed public demo events: **5/5**.
 
@@ -156,8 +177,11 @@ later gated steps.
 - `companion_mind/runtime.py` — event store, MitigationSpec loader, runtime, replay CLI, and guard
 - `companion_mind/providers/` — provider-neutral contracts and DeepSeek V4 adapter
 - `companion_mind/prompt.py` — runtime-owned persona/state prompt assembly
+- `companion_mind/observer.py` — replaceable turn-level State Observer boundary
 - `companion_mind/raw/` — append-only Unified RAW conversation persistence
+- `companion_mind/state/` — Stable Core, Current State, delta journal, reducer, and replay
 - `tests/test_runtime.py` — contract, safeguard, persistence, replay, and state tests
+- `tests/test_runtime_contract_v2.py` — offline Runtime Contract v2 Gates A–H
 - `schemas/evaluation_case.schema.json` — shared evaluation contract
 - `docs/history/README.md` — audited Gen1 migration ledger
 

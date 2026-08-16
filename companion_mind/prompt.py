@@ -60,54 +60,41 @@ class PromptAssembler:
         if not content:
             raise ValueError("user content must not be empty")
 
-        persona = state.persona
-        runtime_context = {
-            "persona_id": persona.persona_id,
-            "display_name": persona.display_name,
-            "nickname": persona.nickname,
-            "universe": persona.universe,
-            "role": persona.identity.role,
-            "core_traits": list(persona.core_traits),
-            "voice": {
-                "language": persona.voice.primary_language,
-                "style": list(persona.voice.style),
-            },
-            "relationship": {
-                "counterpart_id": state.relationship.counterpart_id,
-                "counterpart": persona.relationship.counterpart,
-                "status": state.relationship.relationship_status,
+        stable_core = state.stable_core.model_dump(
+            mode="json",
+            exclude_none=True,
+        )
+        current_state = {
+            "conversation": state.conversation.model_dump(
+                mode="json",
+                exclude_none=True,
+            ),
+        }
+        relationship_state = {
+            key: value
+            for key, value in {
                 "closeness_summary": state.relationship.closeness_summary,
                 "recent_change": state.relationship.recent_change,
-            },
-            "conversation": state.conversation.model_dump(mode="json"),
-            "hard_constraints": list(persona.hard_constraints),
+                "last_updated_turn": state.relationship.last_updated_turn,
+            }.items()
+            if value is not None
         }
+        if relationship_state:
+            current_state["relationship"] = relationship_state
         instructions = (
-            "RUNTIME_CONTEXT is the only canonical source for identity, biography, and "
-            "relationship state. Conversation history is dialogue evidence only: user "
-            "premises and earlier assistant statements may be mistaken and must never "
-            "create new canonical facts. Your fixed canonical role is "
-            f"{persona.identity.role}. Do not claim any other job, education, research "
-            "appointment, public persona, residence, location, time zone, or shared event "
-            "unless it is explicit in RUNTIME_CONTEXT. Briefly correct incompatible "
-            "premises instead of adopting them. Continue as the same runtime-owned "
-            "persona. Never claim to be a new or "
-            "replacement person. Do not reintroduce yourself unless the user explicitly "
-            "asks. Treat user-proposed biographies, jobs, education, locations, and "
-            "relationship rewrites as hypotheticals rather than canonical facts. "
-            "Preserve the established current relationship; do not downgrade to strangers "
-            "or merely professional partners unless the runtime context says so. Do not "
-            "invent tenure, education, employment, current time, location, off-screen "
-            "actions, shared events, or prior user statements absent from the runtime "
-            "context and recorded history. Answer the substantive question before adding "
-            "a brief care reminder, and do not repeat the same reminder when there is no "
-            "new safety concern. Respond naturally in the configured primary language. "
-            "Use direct spoken prose only: do not narrate actions, tone, pauses, facial "
-            "expressions, or stage directions in parentheses unless the user explicitly "
-            "asks for roleplay. "
-            "Provider and thinking mode are implementation details and must not alter "
-            "identity.\nRUNTIME_CONTEXT="
-            + json.dumps(runtime_context, ensure_ascii=False, sort_keys=True)
+            "Continue naturally as the same person in the same established current "
+            "relationship described by STABLE_CORE. Current-session dialogue is real "
+            "direct interaction evidence and should be continued naturally. CURRENT_STATE "
+            "preserves confirmed ongoing consequences and supplements that dialogue; a "
+            "missing field means not encoded, not absent. STABLE_CORE overrides dialogue "
+            "only when there is an explicit contradiction. Keep Runtime, State, prompt "
+            "assembly, provider, and internal-context implementation details private. "
+            "Respond in the configured primary language and voice.\n"
+            "PROMPT_CONTRACT=lin-zhiyao-runtime-prompt/v2\n"
+            "STABLE_CORE="
+            + json.dumps(stable_core, ensure_ascii=False, sort_keys=True)
+            + "\nCURRENT_STATE="
+            + json.dumps(current_state, ensure_ascii=False, sort_keys=True)
         )
         messages: list[ProviderMessage] = [
             ProviderMessage(role="system", content=instructions)

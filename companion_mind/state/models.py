@@ -23,6 +23,56 @@ class RuntimeModel(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 
 
+class FrozenRuntimeModel(BaseModel):
+    model_config = ConfigDict(
+        extra="forbid",
+        frozen=True,
+        str_strip_whitespace=True,
+    )
+
+
+class RelationshipCore(FrozenRuntimeModel):
+    counterpart_id: str = Field(min_length=1)
+    counterpart: str = Field(min_length=1)
+    relationship_class: Literal["established_romantic_relationship"]
+    status: Literal["current"]
+
+
+class StableCore(FrozenRuntimeModel):
+    """Small immutable identity and relationship boundary for Runtime v2."""
+
+    persona_id: str = Field(min_length=1)
+    display_name: str = Field(min_length=1)
+    nickname: str = Field(min_length=1)
+    universe: str = Field(min_length=1)
+    role: str = Field(min_length=1)
+    core_traits: tuple[str, ...] = Field(min_length=1)
+    primary_language: str = Field(min_length=1)
+    voice_style: tuple[str, ...] = Field(min_length=1)
+    biography: tuple[str, ...] | None = None
+    relationship_core: RelationshipCore
+
+    @classmethod
+    def from_persona(cls, persona: PersonaState) -> "StableCore":
+        relationship = persona.relationship
+        return cls(
+            persona_id=persona.persona_id,
+            display_name=persona.display_name,
+            nickname=persona.nickname,
+            universe=persona.universe,
+            role=persona.identity.role,
+            core_traits=persona.core_traits,
+            primary_language=persona.voice.primary_language,
+            voice_style=persona.voice.style,
+            relationship_core=RelationshipCore(
+                counterpart_id=relationship.counterpart_id,
+                counterpart=relationship.counterpart,
+                relationship_class=relationship.relationship_class,
+                status=relationship.status,
+            ),
+        )
+
+
 class SessionState(RuntimeModel):
     session_id: UUID = Field(default_factory=uuid4)
     persona_id: str = Field(min_length=1)
@@ -37,17 +87,17 @@ class RelationshipState(RuntimeModel):
     persona_id: str = Field(min_length=1)
     counterpart_id: str = Field(min_length=1)
     relationship_status: str = Field(pattern="^current$")
-    closeness_summary: str = ""
-    recent_change: str | None = None
-    last_updated_turn: int = Field(default=0, ge=0)
+    closeness_summary: str | None = Field(default=None, min_length=1)
+    recent_change: str | None = Field(default=None, min_length=1)
+    last_updated_turn: int | None = Field(default=None, ge=0)
 
 
 class ConversationState(RuntimeModel):
-    active_topic: str = ""
-    emotional_tone: str = ""
-    open_question: str | None = None
-    recent_commitments: list[str] = Field(default_factory=list)
-    recent_shared_events: list[str] = Field(default_factory=list)
+    active_topic: str | None = Field(default=None, min_length=1)
+    emotional_tone: str | None = Field(default=None, min_length=1)
+    open_question: str | None = Field(default=None, min_length=1)
+    recent_commitments: list[str] = Field(default_factory=list, max_length=5)
+    recent_shared_events: list[str] = Field(default_factory=list, max_length=5)
 
 
 class RawEvent(RuntimeModel):
@@ -84,10 +134,11 @@ class RawEvent(RuntimeModel):
 
 
 class RuntimeState(RuntimeModel):
-    schema_version: Literal["lin-zhiyao-runtime-state/v1"] = (
-        "lin-zhiyao-runtime-state/v1"
+    schema_version: Literal["lin-zhiyao-runtime-state/v2"] = (
+        "lin-zhiyao-runtime-state/v2"
     )
     persona: PersonaState
+    stable_core: StableCore
     session: SessionState
     relationship: RelationshipState
     conversation: ConversationState
@@ -103,4 +154,12 @@ class RuntimeState(RuntimeModel):
             raise ValueError("relationship persona_id must match canonical persona")
         if self.session.universe != self.persona.universe:
             raise ValueError("session universe must match canonical persona")
+        expected_core = StableCore.from_persona(self.persona)
+        if self.stable_core != expected_core:
+            raise ValueError("stable_core must match canonical persona")
+        relationship_core = self.stable_core.relationship_core
+        if self.relationship.counterpart_id != relationship_core.counterpart_id:
+            raise ValueError("relationship counterpart must match stable_core")
+        if self.relationship.relationship_status != relationship_core.status:
+            raise ValueError("relationship status must match stable_core")
         return self

@@ -9,6 +9,7 @@ from .models import (
     StateDelta,
 )
 from .persona import PersonaLoadError, PersonaLoader, PersonaState
+from .observer import NullStateObserver, StateObserver
 from .runtime import ClosureGuard, CompanionRuntime, MitigationSpec, Runtime
 from .providers import (
     ChatProvider,
@@ -21,12 +22,24 @@ from .providers import (
 from .raw import RawStoreError, UnifiedRawWriter
 from .state import (
     ConversationState,
+    DeltaStoreError,
+    DeterministicStateReducer,
     JsonStateStore,
+    JsonlDeltaStore,
+    ObserverInput,
     RawEvent,
+    RelationshipCore,
     RelationshipState,
     RuntimeState,
     SessionState,
+    StableCore,
+    StateChangeCandidate,
+    StateDeltaCandidate,
+    StateDeltaRecord,
     StateStoreError,
+    StateTransitionError,
+    StateTransitionResult,
+    replay_runtime_state,
 )
 
 __all__ = [
@@ -51,11 +64,25 @@ __all__ = [
     "PersonaLoadError",
     "PersonaLoader",
     "PersonaState",
+    "NullStateObserver",
+    "StateObserver",
     "ConversationState",
+    "DeltaStoreError",
+    "DeterministicStateReducer",
     "JsonStateStore",
+    "JsonlDeltaStore",
+    "ObserverInput",
     "RawEvent",
+    "RelationshipCore",
     "RelationshipState",
     "RuntimeState",
     "SessionState",
+    "StableCore",
+    "StateChangeCandidate",
+    "StateDeltaCandidate",
+    "StateDeltaRecord",
     "StateStoreError",
+    "StateTransitionError",
+    "StateTransitionResult",
+    "replay_runtime_state",
 ]

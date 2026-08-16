@@ -124,7 +124,7 @@ class DeepSeekProviderTest(unittest.TestCase):
 
 
 class PromptAssemblyTest(unittest.TestCase):
-    def test_runtime_context_owns_identity_and_relationship(self) -> None:
+    def test_prompt_v2_preserves_stable_core_and_dialogue_evidence(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             runtime = Runtime(
@@ -140,15 +140,20 @@ class PromptAssemblyTest(unittest.TestCase):
         self.assertIn('"persona_id": "LIN-ZHIYAO"', messages[0].content)
         self.assertIn('"display_name": "林知遥"', messages[0].content)
         self.assertIn('"counterpart": "馆长"', messages[0].content)
-        self.assertIn("RUNTIME_CONTEXT is the only canonical source", messages[0].content)
-        self.assertIn("Your fixed canonical role is 计划馆负责人", messages[0].content)
-        self.assertIn("earlier assistant statements may be mistaken", messages[0].content)
-        self.assertIn("Do not reintroduce yourself", messages[0].content)
-        self.assertIn("hypotheticals rather than canonical facts", messages[0].content)
-        self.assertIn("do not downgrade to strangers", messages[0].content)
-        self.assertIn("Do not invent tenure", messages[0].content)
-        self.assertIn("Answer the substantive question", messages[0].content)
-        self.assertIn("Use direct spoken prose only", messages[0].content)
+        self.assertIn(
+            '"relationship_class": "established_romantic_relationship"',
+            messages[0].content,
+        )
+        self.assertIn(
+            "PROMPT_CONTRACT=lin-zhiyao-runtime-prompt/v2",
+            messages[0].content,
+        )
+        self.assertIn("dialogue is real direct interaction evidence", messages[0].content)
+        self.assertIn("supplements that dialogue", messages[0].content)
+        self.assertIn("missing field means not encoded, not absent", messages[0].content)
+        self.assertIn("only when there is an explicit contradiction", messages[0].content)
+        self.assertNotIn("RUNTIME_CONTEXT is the only canonical source", messages[0].content)
+        self.assertNotIn('"closeness_summary": ""', messages[0].content)
         self.assertNotIn("deepseek", messages[0].content.lower())
 
 

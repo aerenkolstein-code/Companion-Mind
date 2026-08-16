@@ -19,6 +19,7 @@ core_traits:
 relationship:
   counterpart_id: CURATOR
   counterpart: 馆长
+  relationship_class: established_romantic_relationship
   status: current
   closeness: runtime_managed
 
