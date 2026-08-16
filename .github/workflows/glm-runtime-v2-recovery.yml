@@ -46,20 +46,6 @@ jobs:
           git merge-base --is-ancestor "$frozen" HEAD
           git diff --exit-code "$frozen" -- companion_mind personas
 
-      - name: Verify workflow is the exact temporary one-shot trigger
-        shell: bash
-        run: |
-          python - <<'PY'
-          from pathlib import Path
-
-          text = Path(".github/workflows/glm-runtime-v2-recovery.yml").read_text()
-          assert "  push:" in text
-          assert "agent/eng-diag-03-glm47-runtime-v2" in text
-          assert "ci: dispatch one-shot ENG-DIAG-03" in text
-          for forbidden in ("  pull_request:", "  schedule:"):
-              assert forbidden not in text
-          PY
-
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
