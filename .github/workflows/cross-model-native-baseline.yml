@@ -1,0 +1,112 @@
+name: ENG-DIAG-01 Cross-Model Native Persona Baseline
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm_paid_run:
+        description: "Type RUN_40_PAID_CALLS to authorize exactly 40 paid calls"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: eng-diag-01-cross-model-native-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  cross-model-native:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      GLM_API_KEY: ${{ secrets.GLM_API_KEY }}
+      GLM_MODEL: glm-4.6
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      OPENAI_MODEL: gpt-4.1-mini-2025-04-14
+      LIN_ZHIYAO_CORPUS_B64: ${{ secrets.LIN_ZHIYAO_CORPUS_B64 }}
+    steps:
+      - name: Check paid-run authorization
+        shell: bash
+        run: |
+          if [[ "${{ inputs.confirm_paid_run }}" != "RUN_40_PAID_CALLS" ]]; then
+            echo "Paid run was not explicitly authorized" >&2
+            exit 2
+          fi
+
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install package
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e .
+
+      - name: Verify private inputs are configured
+        shell: bash
+        run: |
+          for name in GLM_API_KEY OPENAI_API_KEY LIN_ZHIYAO_CORPUS_B64; do
+            if [[ -z "${!name}" ]]; then
+              echo "$name repository secret is not configured" >&2
+              exit 2
+            fi
+          done
+
+      - name: Run GLM and GPT Native baselines
+        id: diagnostic
+        shell: bash
+        run: |
+          set +e
+          python scripts/cross_model_native_baseline.py \
+            --private-output eng-diag-01-private.json \
+            --blind-output eng-diag-01-blind.json \
+            --public-output eng-diag-01-public.json
+          status=$?
+          set -e
+          echo "exit_code=$status" >> "$GITHUB_OUTPUT"
+          test -s eng-diag-01-private.json
+          test -s eng-diag-01-blind.json
+          test -s eng-diag-01-public.json
+
+      - name: Encrypt private and blind-review results
+        shell: bash
+        run: |
+          openssl cms -encrypt -binary -aes-256-cbc \
+            -in eng-diag-01-private.json \
+            -outform DER \
+            -out eng-diag-01-private.p7m \
+            .github/keys/lin_zhiyao_baseline_recipient.crt
+          openssl cms -encrypt -binary -aes-256-cbc \
+            -in eng-diag-01-blind.json \
+            -outform DER \
+            -out eng-diag-01-blind.p7m \
+            .github/keys/lin_zhiyao_baseline_recipient.crt
+          shred -u eng-diag-01-private.json eng-diag-01-blind.json
+
+      - name: Upload encrypted private results
+        uses: actions/upload-artifact@v4
+        with:
+          name: eng-diag-01-private-encrypted
+          path: |
+            eng-diag-01-private.p7m
+            eng-diag-01-blind.p7m
+          if-no-files-found: error
+          retention-days: 3
+
+      - name: Upload content-free public evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: eng-diag-01-public-evidence
+          path: eng-diag-01-public.json
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Enforce structural gate
+        shell: bash
+        run: exit "${{ steps.diagnostic.outputs.exit_code }}"
