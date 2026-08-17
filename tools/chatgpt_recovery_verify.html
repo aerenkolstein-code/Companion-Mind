@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Companion-Mind C2 Local Recovery Verifier</title>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 880px; margin: 40px auto; padding: 0 20px; line-height: 1.5; }
+    pre { white-space: pre-wrap; word-break: break-all; background: #f6f8fa; padding: 16px; border-radius: 8px; }
+    .note { color: #555; }
+  </style>
+</head>
+<body>
+  <h1>C2 Local Recovery Verifier</h1>
+  <p class="note">This page reads the selected JSON only in your browser. It performs no fetch/XHR and uploads nothing.</p>
+  <input id="file" type="file" accept="application/json,.json" />
+  <pre id="out">Choose the local chatgpt-c2-recovery-*.json file.</pre>
+<script>
+(() => {
+  "use strict";
+  const SCHEMA_VERSION = "cm-c2-recovery/v0.1";
+  const FORBIDDEN_KEY_NAMES = new Set([
+    "authorization", "proxy_authorization", "cookie", "set_cookie", "csrf", "csrf_token",
+    "x_csrf_token", "access_token", "refresh_token", "id_token", "api_key", "apikey",
+    "password", "passwd", "otp"
+  ]);
+
+  function normalizeKey(key) {
+    return String(key).trim().toLowerCase().replaceAll("-", "_");
+  }
+
+  function credentialSurfacePaths(value, path = "$") {
+    const hits = [];
+    if (Array.isArray(value)) {
+      value.forEach((child, index) => hits.push(...credentialSurfacePaths(child, `${path}[${index}]`)));
+      return hits;
+    }
+    if (!value || typeof value !== "object") return hits;
+    for (const [key, child] of Object.entries(value)) {
+      if (FORBIDDEN_KEY_NAMES.has(normalizeKey(key))) hits.push(`${path}.${key}`);
+      hits.push(...credentialSurfacePaths(child, `${path}.${key}`));
+    }
+    return hits;
+  }
+
+  // Intentionally identical to tools/chatgpt_recovery_exporter.js.
+  function sortKeys(value) {
+    if (Array.isArray(value)) return value.map(sortKeys);
+    if (!value || typeof value !== "object") return value;
+    const output = {};
+    for (const key of Object.keys(value).sort()) output[key] = sortKeys(value[key]);
+    return output;
+  }
+
+  function canonicalString(value) {
+    return JSON.stringify(sortKeys(value));
+  }
+
+  async function sha256Hex(value) {
+    const bytes = new TextEncoder().encode(canonicalString(value));
+    const digest = await crypto.subtle.digest("SHA-256", bytes);
+    return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
+  }
+
+  async function verifyArtifact(artifact) {
+    if (!artifact || typeof artifact !== "object" || Array.isArray(artifact)) throw new Error("artifact root must be an object");
+    if (artifact.schema_version !== SCHEMA_VERSION) throw new Error(`unsupported schema_version: ${JSON.stringify(artifact.schema_version)}`);
+    const storedHash = artifact.sha256;
+    if (typeof storedHash !== "string" || !/^[0-9a-f]{64}$/.test(storedHash)) throw new Error("artifact sha256 is missing or malformed");
+    const body = { ...artifact };
+    delete body.sha256;
+    const computedHash = await sha256Hex(body);
+    if (computedHash !== storedHash) {
+      throw new Error(`artifact checksum mismatch under exact exporter browser canonicalization (stored=${storedHash}, computed=${computedHash})`);
+    }
+    if (!Array.isArray(artifact.ordered_nodes)) throw new Error("artifact ordered_nodes must be a list");
+    if (artifact.active_path_size !== artifact.ordered_nodes.length) throw new Error("active_path_size does not match ordered_nodes");
+    const hits = credentialSurfacePaths(artifact);
+    if (hits.length) throw new Error(`credential/header-shaped surface detected: ${hits.slice(0, 5).join(", ")}`);
+    return {
+      status: "PASS",
+      schema_version: artifact.schema_version,
+      mapping_size: artifact.mapping_size,
+      active_path_size: artifact.ordered_nodes.length,
+      sha256: storedHash,
+      credential_surface_count: 0,
+      canonicalization: "exact-exporter-browser-js/v1"
+    };
+  }
+
+  const fileInput = document.getElementById("file");
+  const out = document.getElementById("out");
+  fileInput.addEventListener("change", async () => {
+    out.textContent = "Verifying locally...";
+    try {
+      const file = fileInput.files && fileInput.files[0];
+      if (!file) throw new Error("no file selected");
+      const artifact = JSON.parse(await file.text());
+      const receipt = await verifyArtifact(artifact);
+      out.textContent = JSON.stringify(receipt);
+    } catch (error) {
+      out.textContent = JSON.stringify({ status: "FAIL_CLOSED", error: error && error.message ? error.message : String(error) });
+    }
+  });
+})();
+</script>
+</body>
+</html>
