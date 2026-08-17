@@ -1,0 +1,47 @@
+{
+  "entries": [
+    {
+      "disposition": "MATCHED",
+      "expected_role": "user",
+      "known_turn_id_or_dom_id": "turn-user-1",
+      "matched_bulk_path_index": 1,
+      "nearest_bulk_node_ids": ["root", "u1", "a1"],
+      "reason": "stable id matched node_id/message_id/known turn metadata",
+      "renderable_index": 0
+    },
+    {
+      "disposition": "MATCHED",
+      "expected_role": "assistant",
+      "known_turn_id_or_dom_id": "turn-assistant-1",
+      "matched_bulk_path_index": 2,
+      "nearest_bulk_node_ids": ["u1", "a1"],
+      "reason": "stable id matched node_id/message_id/known turn metadata",
+      "renderable_index": 1
+    },
+    {
+      "disposition": "MISSING_FROM_BULK",
+      "expected_role": "assistant",
+      "known_turn_id_or_dom_id": "missing-turn",
+      "matched_bulk_path_index": null,
+      "nearest_bulk_node_ids": [],
+      "reason": "stable ledger id is absent from bulk artifact",
+      "renderable_index": 2
+    },
+    {
+      "disposition": "EXTRA_GRAPH_NODE",
+      "expected_role": null,
+      "known_turn_id_or_dom_id": null,
+      "matched_bulk_path_index": 0,
+      "nearest_bulk_node_ids": ["root"],
+      "reason": "active-path graph node has no matched renderable-ledger entry",
+      "renderable_index": null
+    }
+  ],
+  "schema_version": "cm-c2-reconciliation/v0.1",
+  "summary": {
+    "AMBIGUOUS_MAPPING": 0,
+    "EXTRA_GRAPH_NODE": 1,
+    "MATCHED": 2,
+    "MISSING_FROM_BULK": 1
+  }
+}
