@@ -40,6 +40,9 @@ jobs:
       - name: Run exact-JS C2 verifier test
         run: node tests/test_chatgpt_recovery_verify.mjs
 
+      - name: Run C2 recovery reconciliation tests
+        run: node tests/test_chatgpt_recovery_reconcile.mjs
+
       - name: Verify installed CLI and deterministic replay
         run: |
           event_dir="$(mktemp -d)"
