@@ -1,0 +1,35 @@
+{
+  "event_id": "evt-import-001",
+  "session_id": "session-synthetic-001",
+  "turn_id": "turn-0001",
+  "sequence_no": 10,
+  "actor_role": "user",
+  "message_id": "message-user-001",
+  "persona_id": "persona-synthetic-001",
+  "relationship_id": "relationship-synthetic-001",
+  "provider": "synthetic-provider",
+  "model": "synthetic-model",
+  "observed_at": "2026-08-17T16:05:00+02:00",
+  "created_at": "2026-08-17T16:10:00+02:00",
+  "content_type": "text/plain",
+  "content_payload": "Synthetic historical import; no missing shared history inferred.",
+  "status": "complete",
+  "source_ref": {
+    "source_kind": "historical_backfill",
+    "observation_type": "imported",
+    "source_id": "synthetic-archive-file-001",
+    "uri": "https://example.invalid/public-safe-fixture",
+    "adapter_version": "phase0-synthetic"
+  },
+  "attachment_ref": [],
+  "correction_id": null,
+  "correction_of": null,
+  "redaction_state": "none",
+  "metadata": {
+    "adapter": "A020",
+    "adapter_version": "phase0-synthetic",
+    "ingest_id": "ingest-010",
+    "knowledge": {},
+    "extensions": {}
+  }
+}

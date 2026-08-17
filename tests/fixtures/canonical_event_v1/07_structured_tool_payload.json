@@ -1,0 +1,44 @@
+{
+  "event_id": "evt-tool-structured-001",
+  "session_id": "session-synthetic-001",
+  "turn_id": "turn-0001",
+  "sequence_no": 7,
+  "actor_role": "tool",
+  "message_id": null,
+  "persona_id": "persona-synthetic-001",
+  "relationship_id": "relationship-synthetic-001",
+  "provider": "synthetic-provider",
+  "model": "synthetic-model",
+  "observed_at": "2026-08-17T16:02:00+02:00",
+  "created_at": "2026-08-17T16:02:00+02:00",
+  "content_type": "application/json",
+  "content_payload": {
+    "scores": [
+      0.25,
+      0.75
+    ],
+    "accepted": true,
+    "labels": {
+      "kind": "synthetic"
+    }
+  },
+  "status": "complete",
+  "source_ref": {
+    "source_kind": "owned_client",
+    "observation_type": "observed",
+    "source_id": "owned-tool-001",
+    "uri": null,
+    "adapter_version": "phase0-synthetic"
+  },
+  "attachment_ref": [],
+  "correction_id": null,
+  "correction_of": null,
+  "redaction_state": "none",
+  "metadata": {
+    "adapter": "A019",
+    "adapter_version": "phase0-synthetic",
+    "ingest_id": "ingest-007",
+    "knowledge": {},
+    "extensions": {}
+  }
+}
