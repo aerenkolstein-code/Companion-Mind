@@ -33,6 +33,24 @@ Companion-Mind implements the protection. The paired [LLM Evaluation Lab](https:
 
 > In the current reproducible first-closed-loop evaluation, the implemented Closure Guard improved the tested cases from 20% baseline accuracy to 100%; broader generalization has not yet been established.
 
+## Engineering case study — long-conversation recovery
+
+A read-only browser-forensics investigation started with a ChatGPT conversation whose print preview was roughly **6,394 pages** and whose virtualized UI could take tens of seconds to materialize one long answer.
+
+The investigation traced the data through Network telemetry, virtualized DOM, React turn identity, browser storage, React Fiber, and React Query. In the final residency check, only **56** text-like turns were materialized in the DOM while **3,486 / 3,486** offscreen text-like nodes already carried non-empty payloads in the in-memory conversation graph.
+
+```text
+6,394-page UI
+→ 3,529 renderable-turn ledger
+→ 3,775-node conversation mapping
+→ 3,719-node active path
+→ bulk local export + checksum
+→ reconcile
+→ targeted UI backfill only for gaps
+```
+
+[Read the public-safe case study](docs/case-studies/chatgpt-long-conversation-recovery.md) · [Implementation tracker](https://github.com/aerenkolstein-code/Companion-Mind/issues/10)
+
 ## Reproduce
 
 Requires Python 3.11 or later. No API key or third-party runtime dependency is required.
@@ -105,6 +123,7 @@ companion-mind demo --mitigation-spec /tmp/mitigation.json
 - `companion_mind/runtime.py` — event store, MitigationSpec loader, runtime, replay CLI, and guard
 - `tests/test_runtime.py` — contract, safeguard, persistence, replay, and state tests
 - `schemas/evaluation_case.schema.json` — shared evaluation contract
+- `docs/case-studies/chatgpt-long-conversation-recovery.md` — public-safe forensic recovery case study
 - `docs/history/README.md` — audited Gen1 migration ledger
 
 ## Privacy
