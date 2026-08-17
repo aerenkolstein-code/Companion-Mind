@@ -4,6 +4,16 @@
 
 [![Test](https://github.com/aerenkolstein-code/Companion-Mind/actions/workflows/test.yml/badge.svg)](https://github.com/aerenkolstein-code/Companion-Mind/actions/workflows/test.yml)
 
+## Current engineering focus
+
+Companion-Mind is the **A1 / Build the system** repository for the approved **Persistent AI Companion** product direction. The long-term product goal is a companion that can preserve identity, shared history, relationship state, and bounded initiative across time, sessions, and model changes while the underlying foundation model remains a replaceable cognition provider.
+
+The current active engineering gate is [Phase 0 — Canonical Event & Runtime Boundary Contract](https://github.com/aerenkolstein-code/Companion-Mind/issues/11). That work is defining the shared event contract and ownership boundary for Journal / Current / Memory / Persona-Relationship state before the durable Journal and higher product runtime are built.
+
+The `main` branch below remains the stable, reproducible **First Closed Loop** artifact. Product-level Canonical Journal and Persistent Companion runtime work are active engineering directions, **not claims of completed or merged functionality**.
+
+The paired [LLM Evaluation Lab](https://github.com/aerenkolstein-code/llm-evaluation-lab) is the A2 / measurement counterpart: Companion-Mind builds the system; LLM Evaluation Lab measures whether it actually improves.
+
 ## First Closed Loop
 
 | Result | Measured value |
