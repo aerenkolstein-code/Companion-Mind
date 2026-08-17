@@ -1,0 +1,15 @@
+{
+  "gaps": [
+    {
+      "disposition": "MISSING_FROM_BULK",
+      "expected_role": "assistant",
+      "known_turn_id_or_dom_id": "missing-turn",
+      "matched_bulk_path_index": null,
+      "nearest_bulk_node_ids": [],
+      "reason": "stable ledger id is absent from bulk artifact",
+      "recommended_backfill_action": "sidebar_random_access",
+      "renderable_index": 2
+    }
+  ],
+  "schema_version": "cm-c2-gap-ledger/v0.1"
+}
