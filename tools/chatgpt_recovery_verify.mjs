@@ -1,6 +1,8 @@
 #!/usr/bin/env node
 import fs from "node:fs";
 import crypto from "node:crypto";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 const SCHEMA_VERSION = "cm-c2-recovery/v0.1";
 const FORBIDDEN_KEY_NAMES = new Set([
@@ -15,22 +17,21 @@ function normalizeKey(key) {
   return String(key).trim().toLowerCase().replaceAll("-", "_");
 }
 
-function credentialSurfacePaths(value, path = "$") {
+function credentialSurfacePaths(value, pathValue = "$") {
   const hits = [];
   if (Array.isArray(value)) {
-    value.forEach((child, index) => hits.push(...credentialSurfacePaths(child, `${path}[${index}]`)));
+    value.forEach((child, index) => hits.push(...credentialSurfacePaths(child, `${pathValue}[${index}]`)));
     return hits;
   }
   if (!value || typeof value !== "object") return hits;
   for (const [key, child] of Object.entries(value)) {
-    if (FORBIDDEN_KEY_NAMES.has(normalizeKey(key))) hits.push(`${path}.${key}`);
-    hits.push(...credentialSurfacePaths(child, `${path}.${key}`));
+    if (FORBIDDEN_KEY_NAMES.has(normalizeKey(key))) hits.push(`${pathValue}.${key}`);
+    hits.push(...credentialSurfacePaths(child, `${pathValue}.${key}`));
   }
   return hits;
 }
 
-// IMPORTANT: this is intentionally byte-for-byte the same canonicalization
-// algorithm used by tools/chatgpt_recovery_exporter.js.
+// IMPORTANT: intentionally identical to the exporter canonicalization.
 function sortKeys(value) {
   if (Array.isArray(value)) return value.map(sortKeys);
   if (!value || typeof value !== "object") return value;
@@ -104,6 +105,5 @@ function main(argv = process.argv.slice(2)) {
   }
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
-  process.exitCode = main();
-}
+const isMain = process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url));
+if (isMain) process.exitCode = main();
