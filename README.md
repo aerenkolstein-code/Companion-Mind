@@ -8,9 +8,11 @@
 
 Companion-Mind is the **A1 / Build the system** repository for the approved **Persistent AI Companion** product direction. The long-term product goal is a companion that can preserve identity, shared history, relationship state, and bounded initiative across time, sessions, and model changes while the underlying foundation model remains a replaceable cognition provider.
 
-The current active engineering gate is [Phase 0 — Canonical Event & Runtime Boundary Contract](https://github.com/aerenkolstein-code/Companion-Mind/issues/11). That work is defining the shared event contract and ownership boundary for Journal / Current / Memory / Persona-Relationship state before the durable Journal and higher product runtime are built.
+**Phase 0 — Canonical Event & Runtime Boundary Contract v1** has landed on `main` and Gate P0 is GREEN. It freezes the shared event contract and ownership boundary for Journal / Current / Memory / Persona-Relationship state. Durable Journal / Phase 1 and the higher Persistent Companion runtime remain separately gated and are **not claimed as implemented here**.
 
-The `main` branch below remains the stable, reproducible **First Closed Loop** artifact. Product-level Canonical Journal and Persistent Companion runtime work are active engineering directions, **not claims of completed or merged functionality**.
+Separately, the bounded read-only **C2 long-conversation recovery prototype** has landed on `main`. It can recover an already-hydrated ChatGPT Web conversation graph locally, checksum the artifact, and reconcile it against a renderable-turn ledger while leaving residual gaps explicit. This is an experimental browser-forensics/recovery artifact, **not** a production ChatGPT integration or a supported OpenAI API.
+
+The `main` branch remains the stable, reproducible **First Closed Loop** artifact plus the published Phase 0 contract and accepted C2 prototype. Product-level Durable Journal and higher Persistent Companion runtime work remain future gated increments, not completion claims.
 
 The paired [LLM Evaluation Lab](https://github.com/aerenkolstein-code/llm-evaluation-lab) is the A2 / measurement counterpart: Companion-Mind builds the system; LLM Evaluation Lab measures whether it actually improves.
 
@@ -43,9 +45,32 @@ Companion-Mind implements the protection. The paired [LLM Evaluation Lab](https:
 
 > In the current reproducible first-closed-loop evaluation, the implemented Closure Guard improved the tested cases from 20% baseline accuracy to 100%; broader generalization has not yet been established.
 
+## Engineering case study — long-conversation recovery
+
+A read-only browser-forensics investigation started with a ChatGPT conversation whose print preview was roughly **6,394 pages** and whose virtualized UI could take tens of seconds to materialize one long answer.
+
+The investigation traced data through Network telemetry, virtualized DOM, React turn identity, browser storage, React Fiber, and React Query. In the decisive residency check, only **56** text-like turns were materialized in the DOM while **3,486 / 3,486** offscreen text-like nodes already carried non-empty payloads in the in-memory conversation graph.
+
+The accepted bounded prototype then converted that finding into a local read-only exporter/verifier/reconciler:
+
+```text
+6,394-page UI
+→ 3,529 renderable-turn ledger
+→ 3,775-node conversation mapping
+→ 3,719-node active path
+→ bulk local export + deterministic checksum
+→ role + timestamp + monotonic-order reconciliation
+→ 3,523 matched / 5 missing / 196 extra / 1 ambiguous
+→ targeted UI backfill only for explicit residual gaps
+```
+
+The accepted first-prototype gate explicitly did **not** require zero gaps. The final unresolved set is **6 items (5 missing + 1 ambiguous)** and remains known rather than silently backfilled.
+
+[Read the current public-safe case study](docs/case-studies/chatgpt-long-conversation-recovery.md) · [Read the original investigation notes](docs/case-studies/chatgpt-long-conversation-recovery-investigation-notes.md) · [Completed implementation tracker](https://github.com/aerenkolstein-code/Companion-Mind/issues/10) · [Merged implementation PR #15](https://github.com/aerenkolstein-code/Companion-Mind/pull/15)
+
 ## Reproduce
 
-Requires Python 3.11 or later. No API key or third-party runtime dependency is required.
+Requires Python 3.11 or later. No API key or third-party runtime dependency is required for the First Closed Loop demo.
 
 ```bash
 python -m pip install -e .
@@ -113,10 +138,14 @@ companion-mind demo --mitigation-spec /tmp/mitigation.json
 
 - `companion_mind/models.py` — observable runtime contracts
 - `companion_mind/runtime.py` — event store, MitigationSpec loader, runtime, replay CLI, and guard
+- `companion_mind/chatgpt_recovery.py` — C2 fail-closed recovery verification and reconciliation helpers
+- `tools/chatgpt_recovery_exporter.js` — local read-only browser exporter for the accepted C2 prototype
 - `tests/test_runtime.py` — contract, safeguard, persistence, replay, and state tests
 - `schemas/evaluation_case.schema.json` — shared evaluation contract
+- `docs/case-studies/chatgpt-long-conversation-recovery.md` — current public-safe C2 case study and accepted outcome
+- `docs/case-studies/chatgpt-long-conversation-recovery-investigation-notes.md` — original pre-implementation forensic investigation record
 - `docs/history/README.md` — audited Gen1 migration ledger
 
 ## Privacy
 
-Only synthetic, public-safe events and traces are used. The repository contains no private Raw/L0 material, credentials, account data, client documents, personal records, or links to private archives.
+Only synthetic, public-safe events and traces are used. The repository contains no private Raw/L0 material, credentials, account data, client documents, personal records, or links to private archives. The C2 public evidence reports structural counts, checksums, typed failures, and reconciliation status; recovered private conversation bodies remain outside the public repository.
