@@ -62,3 +62,19 @@ client displays or uses that projection.
 
 Phase 0 defines and tests the interface only. It contains no durable journal,
 fsync/recovery engine, provider call, billing path, or Alpha implementation.
+
+## Current roadmap placement — non-normative
+
+The A012 constraints above remain valid interface and scope guards for any future
+commercial companion path, but they do **not** activate A012 or place it directly
+after Durable Journal in the current roadmap.
+
+The current public roadmap is personal-first: after an explicit Durable Journal /
+E1 gate, the product-engineering path moves to owned-client foundations and
+longitudinal dogfooding. A012 is dormant unless a later productization decision
+selects a Persistent AI Companion as a commercial direction.
+
+This placement note changes **no** Canonical Event v1 schema, validator, fixture,
+offline gate, identity rule, authority boundary, or A018/A019/A020 conformance
+requirement. See [`../current-roadmap.md`](../current-roadmap.md) for the public-safe
+roadmap narrative.
