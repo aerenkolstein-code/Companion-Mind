@@ -1,0 +1,5 @@
+[
+  {"renderable_index": 0, "expected_role": "user", "known_turn_id_or_dom_id": "turn-user-1"},
+  {"renderable_index": 1, "expected_role": "assistant", "known_turn_id_or_dom_id": "turn-assistant-1"},
+  {"renderable_index": 2, "expected_role": "assistant", "known_turn_id_or_dom_id": "missing-turn"}
+]

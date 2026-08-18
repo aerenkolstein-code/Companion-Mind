@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Companion-Mind C2 Local Reconciler</title>
+<style>
+body{font-family:system-ui,sans-serif;max-width:980px;margin:32px auto;padding:0 18px;line-height:1.5}label{display:block;margin:14px 0 6px}button{margin-top:16px;padding:8px 14px}pre{white-space:pre-wrap;word-break:break-all;background:#f6f8fa;padding:14px;border-radius:8px}.note{color:#555}
+</style>
+</head>
+<body>
+<h1>C2 Local Recovery Reconciler</h1>
+<p class="note">Both JSON files are read only inside this browser tab. No fetch/XHR/upload is used. The private recovery bodies never leave your machine.</p>
+<label>1) Recovery artifact (`chatgpt-c2-recovery-*.json`)</label>
+<input id="recovery" type="file" accept="application/json,.json" />
+<label>2) Renderable ledger (`chatgpt-c2-renderable-ledger-*.json`)</label>
+<input id="ledger" type="file" accept="application/json,.json" />
+<br/><button id="run">Reconcile locally</button>
+<pre id="out">Choose both files, then click “Reconcile locally”.</pre>
+<script>
+(() => {
+'use strict';
+const RECOVERY_SCHEMA='cm-c2-recovery/v0.1';
+const LEDGER_SCHEMA='cm-c2-renderable-ledger/v0.1';
+const RECON_SCHEMA='cm-c2-reconciliation/v0.2';
+const GAP_SCHEMA='cm-c2-gap-ledger/v0.2';
+const STRICT_TOLERANCE_MS=2;
+const NEAR_TOLERANCE_MS=1000;
+class ReconcileError extends Error{}
+function sortKeys(v){if(Array.isArray(v))return v.map(sortKeys);if(!v||typeof v!=='object')return v;const o={};for(const k of Object.keys(v).sort())o[k]=sortKeys(v[k]);return o}
+function canonicalString(v){return JSON.stringify(sortKeys(v))}
+async function sha256Hex(v){const bytes=new TextEncoder().encode(canonicalString(v));const d=await crypto.subtle.digest('SHA-256',bytes);return[...new Uint8Array(d)].map(b=>b.toString(16).padStart(2,'0')).join('')}
+async function verifyHashedArtifact(a,schema){if(!a||typeof a!=='object'||Array.isArray(a))throw new ReconcileError('artifact root must be an object');if(a.schema_version!==schema)throw new ReconcileError(`unsupported schema_version: ${JSON.stringify(a.schema_version)}`);const stored=a.sha256;if(typeof stored!=='string'||!/^[0-9a-f]{64}$/.test(stored))throw new ReconcileError('artifact sha256 is missing or malformed');const body={...a};delete body.sha256;const computed=await sha256Hex(body);if(computed!==stored)throw new ReconcileError(`artifact checksum mismatch (stored=${stored}, computed=${computed})`);return stored}
+function toEpochMillis(v){if(typeof v==='number'&&Number.isFinite(v))return Math.abs(v)<1e11?v*1000:v;if(typeof v==='string'){const t=v.trim();if(!t)return null;const n=Number(t);if(Number.isFinite(n))return Math.abs(n)<1e11?n*1000:n;const p=Date.parse(t);return Number.isFinite(p)?p:null}return null}
+function bulkRole(n){return n?.role??null}
+function roleMatches(lr,nr){if(lr==='root')return nr==null;return lr===nr}
+function rootCandidate(nodes){if(nodes.length&&nodes[0]&&nodes[0].path_index===0&&bulkRole(nodes[0])==null)return 0;const c=[];for(let i=0;i<nodes.length;i++)if(bulkRole(nodes[i])==null&&nodes[i]?.create_time==null)c.push(i);return c.length===1?c[0]:null}
+async function reconcileArtifacts(recovery,ledger){await verifyHashedArtifact(recovery,RECOVERY_SCHEMA);await verifyHashedArtifact(ledger,LEDGER_SCHEMA);if(!Array.isArray(recovery.ordered_nodes))throw new ReconcileError('recovery ordered_nodes must be a list');if(!Array.isArray(ledger.entries))throw new ReconcileError('ledger entries must be a list');if(recovery.active_path_size!==recovery.ordered_nodes.length)throw new ReconcileError('recovery active_path_size mismatch');if(ledger.ledger_size!==ledger.entries.length)throw new ReconcileError('ledger_size mismatch');if(recovery.conversation_id&&ledger.conversation_id&&recovery.conversation_id!==ledger.conversation_id)throw new ReconcileError('conversation_id mismatch between recovery and renderable ledger');
+const nodes=recovery.ordered_nodes,entries=ledger.entries,matched=new Set(),outs=[],gaps=[];let last=-1;
+for(let li=0;li<entries.length;li++){const le=entries[li]||{},role=le.role??null,lms=toEpochMillis(le.turn_date);let disposition='AMBIGUOUS_MAPPING',reason='',mi=null,delta=null,cands=[];
+if(role==='root'&&li===0){const rc=rootCandidate(nodes);if(rc!==null&&rc>last&&!matched.has(rc)){mi=rc;disposition='MATCHED';reason='root ledger entry matched unique root/no-message graph node'}else{reason='root ledger entry could not be mapped uniquely'}}
+else if(lms===null){reason='ledger turn_date is not parseable; refusing role/order-only match'}
+else{const strict=[],near=[];for(let ni=last+1;ni<nodes.length;ni++){if(matched.has(ni))continue;const node=nodes[ni];if(!roleMatches(role,bulkRole(node)))continue;const nms=toEpochMillis(node?.create_time);if(nms===null)continue;const d=Math.abs(nms-lms);if(d<=STRICT_TOLERANCE_MS)strict.push({ni,delta:d});else if(d<=NEAR_TOLERANCE_MS)near.push({ni,delta:d})}cands=strict.map(x=>x.ni);if(strict.length===1){mi=strict[0].ni;delta=strict[0].delta;disposition='MATCHED';reason=`same-role timestamp matched within ${STRICT_TOLERANCE_MS} ms and preserved order`}else if(strict.length>1){reason=`multiple same-role timestamp candidates within ${STRICT_TOLERANCE_MS} ms`}else if(near.length===0){const full=[];for(let ni=0;ni<nodes.length;ni++){const node=nodes[ni];if(!roleMatches(role,bulkRole(node)))continue;const nms=toEpochMillis(node?.create_time);if(nms===null)continue;const d=Math.abs(nms-lms);if(d<=STRICT_TOLERANCE_MS)full.push({ni,delta:d})}if(full.length){cands=full.map(x=>x.ni);reason='same-role timestamp exists in bulk but violates monotonic order/uniqueness'}else{disposition='MISSING_FROM_BULK';reason=`no same-role bulk timestamp within ${NEAR_TOLERANCE_MS} ms`}}else{cands=near.map(x=>x.ni);reason=`no strict match; ${near.length} same-role candidate(s) exist only within ${NEAR_TOLERANCE_MS} ms`}}
+if(mi!==null){matched.add(mi);last=mi}const nearest=[];const focus=mi??cands[0]??Math.max(0,last);if(nodes.length){const lo=Math.max(0,focus-1),hi=Math.min(nodes.length,focus+2);for(let i=lo;i<hi;i++)nearest.push(nodes[i]?.node_id??null)}const out={renderable_index:le.renderable_index??li,expected_role:role,ledger_turn_date:le.turn_date??null,matched_bulk_path_index:mi,matched_bulk_node_id:mi!==null?(nodes[mi]?.node_id??null):null,timestamp_delta_ms:delta,candidate_bulk_path_indexes:cands.slice(0,8),nearest_bulk_node_ids:nearest,disposition,reason};outs.push(out);if(disposition==='MISSING_FROM_BULK'||disposition==='AMBIGUOUS_MAPPING')gaps.push({...out,recommended_backfill_action:disposition==='MISSING_FROM_BULK'?'sidebar_random_access':'inspect_stable_identity_or_timestamp_collision'})}
+for(let ni=0;ni<nodes.length;ni++){if(matched.has(ni))continue;outs.push({renderable_index:null,expected_role:null,ledger_turn_date:null,matched_bulk_path_index:ni,matched_bulk_node_id:nodes[ni]?.node_id??null,timestamp_delta_ms:null,candidate_bulk_path_indexes:[],nearest_bulk_node_ids:[nodes[ni]?.node_id??null],disposition:'EXTRA_GRAPH_NODE',reason:'active-path graph node has no matched renderable-ledger entry'})}
+const summary={MATCHED:0,MISSING_FROM_BULK:0,EXTRA_GRAPH_NODE:0,AMBIGUOUS_MAPPING:0};for(const x of outs)summary[x.disposition]++;const unresolved=summary.MISSING_FROM_BULK+summary.AMBIGUOUS_MAPPING;const report={schema_version:RECON_SCHEMA,method:'role+timestamp+monotonic-order/v1',strict_tolerance_ms:STRICT_TOLERANCE_MS,near_tolerance_ms:NEAR_TOLERANCE_MS,recovery_sha256:recovery.sha256,ledger_sha256:ledger.sha256,conversation_id_match:!recovery.conversation_id||!ledger.conversation_id||recovery.conversation_id===ledger.conversation_id,recovery_active_path_size:nodes.length,renderable_ledger_size:entries.length,summary,unresolved_gap_count:unresolved,entries:outs};report.sha256=await sha256Hex(report);const gapLedger={schema_version:GAP_SCHEMA,reconciliation_sha256:report.sha256,gaps};gapLedger.sha256=await sha256Hex(gapLedger);return{report,gapLedger}}
+function download(name,value){const blob=new Blob([JSON.stringify(value,null,2)+'\n'],{type:'application/json'}),url=URL.createObjectURL(blob);try{const a=document.createElement('a');a.href=url;a.download=name;a.style.display='none';document.body.appendChild(a);a.click();a.remove()}finally{setTimeout(()=>URL.revokeObjectURL(url),0)}}
+const rEl=document.getElementById('recovery'),lEl=document.getElementById('ledger'),out=document.getElementById('out');document.getElementById('run').addEventListener('click',async()=>{out.textContent='Reconciling locally...';try{const rf=rEl.files?.[0],lf=lEl.files?.[0];if(!rf||!lf)throw new Error('choose both JSON files');const recovery=JSON.parse(await rf.text()),ledger=JSON.parse(await lf.text());const{report,gapLedger}=await reconcileArtifacts(recovery,ledger);download('chatgpt-c2-reconciliation.json',report);download('chatgpt-c2-gap-ledger.json',gapLedger);const receipt={status:'PASS',method:report.method,recovery_sha256:report.recovery_sha256,ledger_sha256:report.ledger_sha256,recovery_active_path_size:report.recovery_active_path_size,renderable_ledger_size:report.renderable_ledger_size,...report.summary,unresolved_gap_count:report.unresolved_gap_count,reconciliation_sha256:report.sha256,gap_ledger_sha256:gapLedger.sha256,network_requests_required:0};out.textContent=JSON.stringify(receipt)}catch(e){out.textContent=JSON.stringify({status:'FAIL_CLOSED',error:e?.message||String(e)})}})
+})();
+</script>
+</body>
+</html>

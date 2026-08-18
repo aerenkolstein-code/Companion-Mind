@@ -1,0 +1,53 @@
+{
+  "active_path_size": 3,
+  "adapter_version": "chatgpt-web-queryclient/v0.1",
+  "conversation_envelope": {
+    "id": "synthetic-conversation",
+    "title": "Synthetic public-safe C2 example"
+  },
+  "conversation_id": "synthetic-conversation",
+  "current_node": "a1",
+  "exported_at": "2026-08-17T17:16:42.108733+00:00",
+  "mapping_size": 3,
+  "ordered_nodes": [
+    {
+      "children_ids": ["u1"],
+      "content_parts": null,
+      "content_type": null,
+      "create_time": null,
+      "message_id": null,
+      "metadata": {},
+      "node_id": "root",
+      "parent_id": null,
+      "path_index": 0,
+      "role": null
+    },
+    {
+      "children_ids": ["a1"],
+      "content_parts": ["synthetic question"],
+      "content_type": "text",
+      "create_time": 1,
+      "message_id": "m-user-1",
+      "metadata": {"turn_id": "turn-user-1"},
+      "node_id": "u1",
+      "parent_id": "root",
+      "path_index": 1,
+      "role": "user"
+    },
+    {
+      "children_ids": [],
+      "content_parts": [{"kind": "text", "text": "synthetic answer"}],
+      "content_type": "multimodal_text",
+      "create_time": 2,
+      "message_id": "m-assistant-1",
+      "metadata": {"dom_turn_id": "turn-assistant-1"},
+      "node_id": "a1",
+      "parent_id": "u1",
+      "path_index": 2,
+      "role": "assistant"
+    }
+  ],
+  "schema_version": "cm-c2-recovery/v0.1",
+  "sha256": "c6f81bf088c4b5008ad9ffb88a7a2e6e06f99ad7d65c16b97ffd4f447e9d3f3f",
+  "source": "chatgpt-web-queryclient-memory"
+}

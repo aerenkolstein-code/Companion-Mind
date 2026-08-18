@@ -1,0 +1,30 @@
+{
+  "id": "synthetic-conversation",
+  "title": "Synthetic public-safe C2 example",
+  "mapping": {
+    "root": {"parent": null, "children": ["u1"], "message": null},
+    "u1": {
+      "parent": "root",
+      "children": ["a1"],
+      "message": {
+        "id": "m-user-1",
+        "author": {"role": "user"},
+        "content": {"content_type": "text", "parts": ["synthetic question"]},
+        "create_time": 1,
+        "metadata": {"turn_id": "turn-user-1"}
+      }
+    },
+    "a1": {
+      "parent": "u1",
+      "children": [],
+      "message": {
+        "id": "m-assistant-1",
+        "author": {"role": "assistant"},
+        "content": {"content_type": "multimodal_text", "parts": [{"kind": "text", "text": "synthetic answer"}]},
+        "create_time": 2,
+        "metadata": {"dom_turn_id": "turn-assistant-1"}
+      }
+    }
+  },
+  "current_node": "a1"
+}

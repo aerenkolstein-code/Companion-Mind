@@ -2,11 +2,19 @@
 
 > **Engineering case study — read-only browser forensics, virtualized UI recovery, and evidence-first debugging**
 
-A very long ChatGPT conversation appeared to require thousands of pages of UI scrolling to recover. The browser print preview estimated roughly **6,394 pages**, while individual long answers could take tens of seconds to materialize and distant jumps could take more than two minutes.
+**Status:** accepted bounded prototype merged to `main`.  
+**Tracker:** [ENG-C2-RECOVERY-01 — Issue #10](https://github.com/aerenkolstein-code/Companion-Mind/issues/10) — **completed**.  
+**Implementation:** [PR #15](https://github.com/aerenkolstein-code/Companion-Mind/pull/15) — merged as `f2ccf2476cc67a391f19e6e290edc8d43abd4531`.
 
-The investigation eventually showed that the visible DOM was not the conversation store. Only a small window of turns was materialized at any moment, while the browser application's in-memory conversation graph already contained the bulk message payload.
+> This case study describes browser internals observed during one ChatGPT Web session on 2026-08-17. These are not public OpenAI APIs or compatibility guarantees. Internal structures may change; the adapter therefore fails closed when required surfaces cannot be identified confidently.
 
-The recovery strategy therefore changed from:
+## Outcome
+
+A very long ChatGPT conversation appeared to require thousands of pages of UI scrolling to recover. Chrome print preview estimated roughly **6,394 pages**, while the virtualized UI could take tens of seconds or more than two minutes to materialize distant long answers.
+
+The key finding was that the visible DOM was only a projection. The browser application's in-memory conversation graph already contained the bulk message payload before the corresponding turns were materialized on screen.
+
+The recovery path therefore changed from:
 
 ```text
 scroll everything → scrape visible DOM
@@ -15,326 +23,41 @@ scroll everything → scrape visible DOM
 to:
 
 ```text
-read application state → export ordered graph → checksum
-→ reconcile against UI turn ledger → backfill only gaps
+read application state
+→ export ordered active graph locally
+→ deterministic checksum
+→ reconcile against the verified UI ledger
+→ use slow UI materialization only for explicit residual gaps
 ```
 
-This document records the reasoning path, failed hypotheses, quantitative checks, architecture model, and safety boundaries behind that transition.
+That design was implemented and accepted as a bounded read-only prototype.
 
-**Implementation tracker:** [ENG-C2-RECOVERY-01 — Issue #10](https://github.com/aerenkolstein-code/Companion-Mind/issues/10)
-
-> This case study describes browser internals observed during one ChatGPT Web session on 2026-08-17. These are not public OpenAI APIs or compatibility guarantees. Internal structures may change and any adapter must fail closed when its assumptions no longer hold.
-
----
-
-## Result at a glance
+## Evidence that unlocked the prototype
 
 | Observation | Measured result |
 |---|---:|
 | Print-preview scale | ~6,394 pages |
-| Verified renderable-turn vector | 3,529 positions |
+| Verified renderable-turn ledger | 3,529 positions |
 | Renderable composition | root 1 + user 1,764 + assistant 1,764 |
 | Conversation `mapping` size | 3,775 graph nodes |
 | Active path from `current_node` to root | 3,719 nodes |
 | Message nodes on active path | 3,718 |
 | Active-path roles | assistant 1,860 / user 1,779 / tool 79 |
 | Text-like user/assistant nodes | 3,542 |
-| Text-like nodes materialized in DOM during the final test | 56 |
+| Text-like turns materialized in DOM during final residency test | 56 |
 | Offscreen text-like nodes | 3,486 |
 | Offscreen nodes with non-empty `content.parts` | **3,486 / 3,486** |
 | Offscreen nodes with empty `content.parts` | **0** |
-| Offscreen nodes with direct string text | 3,456 |
 
-The decisive finding was not merely that a conversation graph existed. It was that **all 3,486 currently offscreen text-like user/assistant nodes already had non-empty content payloads**.
-
-That made bulk local recovery feasible without forcing every turn through the virtualized UI first.
-
----
-
-## The problem
-
-The original recovery plan was straightforward: scroll through the entire conversation, let each turn materialize, then capture the DOM.
-
-That plan failed on cost.
-
-Observed behavior included:
-
-- sequential scrolling often waiting roughly **40–50 seconds** for a long answer to materialize;
-- one distant random-access jump taking about **40 seconds**;
-- another distant jump taking about **2 minutes 17 seconds**;
-- materialization time varying with answer length;
-- the page replacing DOM nodes as the virtualized viewport moved.
-
-Even if the data were intact, a recovery mechanism proportional to all 3,529 renderable turns would be slow and fragile.
-
-The real engineering question became:
-
-> **Where is the conversation data before the UI turns it into visible DOM?**
-
----
-
-## Investigation strategy
-
-The investigation deliberately avoided starting with one large scraping script. Each step tested one narrow hypothesis with a read-only observation, count, shape check, or prototype check.
-
-The sequence was:
-
-```text
-Network
-→ virtualized DOM
-→ stable turn identity
-→ React Fiber / renderable vector
-→ browser persistent storage
-→ React Context
-→ QueryClient
-→ exact conversation cache entry
-→ mapping + current_node
-→ active-path traversal
-→ offscreen body residency
-```
-
-The important discipline was **Source Before Conclusion**: a plausible story did not become an engineering fact until it had a measurable surface.
-
----
-
-## Dead end 1 — Network traffic looked important, but was mostly telemetry
-
-The first hypothesis was that distant navigation must trigger a message-body XHR/fetch response.
-
-Network inspection repeatedly surfaced requests such as `m`, `t`, and `flush`.
-
-Closer inspection changed the interpretation:
-
-- one response returned only a success acknowledgement;
-- `m` payloads matched analytics/metric-counter behavior;
-- `t` payloads matched Segment-style tracking events;
-- distant UI jumps could eventually render long answers without a corresponding large message-body response appearing in the observation window.
-
-The lesson was twofold.
-
-First, **a busy Network panel is not evidence that the target content is travelling in those requests**.
-
-Second, request headers can contain sensitive authentication/session material. Headers were therefore explicitly excluded from the recovery evidence path. The recovery design does not copy cookies, authorization headers, CSRF material, or session tokens.
-
-Network evidence did not prove that no backend source exists. It proved something narrower: the obvious requests in the observed path were not a reusable bulk conversation-body channel.
-
----
-
-## Dead end 2 — The DOM contained thousands of shells
-
-The Elements panel initially suggested that the conversation simply was not loaded. Many turn containers were effectively empty structural shells until they entered the materialized viewport.
-
-A scan observed roughly **3,445 empty shells** at one point.
-
-That turned out to be a virtualization artifact, not a data-absence proof.
-
-The first important identity clue was a turn-container attribute of the form:
-
-```html
-data-turn-id-container="<UUID>"
-```
-
-Additional materialized-node surfaces included attributes such as:
-
-```text
-data-turn-id
-data-turn
-data-message-author-role
-data-testid="conversation-turn-..."
-```
-
-This changed the problem from "scrape anonymous text" to "recover an ordered set of identity-bearing turns."
-
-The DOM still remained unsuitable as the primary store because:
-
-- virtualized nodes can be destroyed and recreated;
-- the same logical turn can have shell/materialized representations;
-- a selected DevTools `$0` node can lose its React Fiber when the page replaces it.
-
-A robust adapter therefore cannot treat a DOM element reference as a durable conversation record.
-
----
-
-## Breakthrough 1 — A complete renderable-turn ledger existed in React state
-
-Following React Fiber and associated state exposed an ordered renderable-turn vector.
-
-Its measured shape was:
-
-```text
-length = 3529
-last index = 3528
-root = 1
-user = 1764
-assistant = 1764
-```
-
-This was the first strong completeness ledger.
-
-Before this point, "the conversation seems complete" was a visual impression. After this point, the UI layer had a machine-checkable expected count: **3,529 renderable positions**.
-
-That number later became the reconciliation target rather than the bulk extraction source.
-
----
-
-## Dead end 3 — Browser persistent storage had promising names but zero records
-
-The Application panel exposed browser databases with names that looked highly relevant, including conversation/search-oriented stores.
-
-Read-only inspection showed that the schemas existed, but the candidate stores contained **zero records**. Cache Storage also did not provide a populated conversation archive.
-
-This resolved an important conceptual confusion:
-
-> "The client has data" does not mean the historical conversation was previously stored on this computer's disk.
-
-A conversation created largely on another device can still appear fully in the current desktop browser if the web application hydrates the conversation into its runtime state after opening it.
-
-The persistent-storage result therefore redirected the search from "disk cache" to **live application state**.
-
----
-
-## Breakthrough 2 — The shared React Query `QueryClient`
-
-A React Context value exposed a small immediate prototype but a parent prototype with the characteristic TanStack / React Query `QueryClient` surface, including methods such as:
-
-```text
-getQueryData
-getQueriesData
-getQueryState
-fetchQuery
-refetchQueries
-invalidateQueries
-getQueryCache
-getMutationCache
-clear
-```
-
-The minified runtime constructor name was not treated as a contract. The method surface was the identity test.
-
-Read-only query-cache inspection then found:
-
-```text
-total queries = 110
-conversation/thread-related candidates = 9
-```
-
-Among them was a successful exact conversation entry shaped like:
-
-```text
-["conversation", <current-conversation-id>]
-```
-
-The successful entry's `state.data` was a substantial conversation payload rather than a thin status wrapper.
-
-Two top-level fields were decisive:
-
-```text
-mapping
-current_node
-```
-
----
-
-## Breakthrough 3 — The conversation graph
-
-Shape inspection produced:
-
-```text
-mapping: Object, size = 3775
-current_node: String
-```
-
-Following `parent` pointers from `current_node` back to root and reversing the path produced a chronological active path with:
-
-```text
-activePathNodes = 3719
-messageNodes = 3718
-noMessageNodes = 1
-cycleDetected = false
-```
-
-Role counts were:
-
-```text
-assistant = 1860
-user = 1779
-tool = 79
-```
-
-This immediately explained why the graph and UI ledger were not expected to match 1:1.
-
-The active path exceeded the 3,529-position UI vector by **190 nodes**, which decomposed exactly as:
-
-```text
-79 tool
-+ 96 extra assistant
-+ 15 extra user
-= 190
-```
-
-The graph was therefore a strict superset of the renderable UI projection.
-
----
-
-## A useful failed shortcut — `content_type` was not the full renderability rule
-
-One tempting hypothesis was that ChatGPT's visible turns could be reproduced simply by filtering graph nodes by role and `content_type`.
-
-The cross-tab disproved that.
-
-For user nodes, every active-path user node was text-like, but the graph contained **1,779** users while the UI ledger contained **1,764**. Exactly **15 text-like user nodes** were filtered by some other rule.
-
-On the assistant side, the simple text-like count also did not map exactly to the **1,764** renderable assistant turns.
-
-So the exact UI renderability predicate remained partially unknown.
-
-Crucially, that no longer blocked recovery. The strategy shifted from "perfectly reproduce the UI filter first" to "preserve the richer graph first, then reconcile."
-
----
-
-## Decisive test — Are offscreen bodies already present?
-
-The final uncertainty was whether the graph contained only metadata for offscreen nodes while message bodies remained lazy-loaded.
-
-A read-only scan compared the ordered active-path nodes with the currently materialized DOM IDs and inspected only content shape/counts, not private message text.
-
-Measured result:
-
-```text
-activePathNodes = 3719
-textLikeUserAssistant = 3542
-materializedNow = 56
-offscreenTextLike = 3486
-offscreenWithPayload = 3486
-offscreenEmptyParts = 0
-offscreenWithDirectText = 3456
-```
-
-By role:
-
-```text
-user offscreen = 1730
-user with payload = 1730
-user direct text = 1730
-
-assistant offscreen = 1756
-assistant with payload = 1756
-assistant direct text = 1726
-```
-
-The remaining 30 assistant records still had structured, non-string parts. They were not empty bodies.
-
-This was the recovery gate:
+The decisive gate was simple:
 
 > **Only 56 text-like turns were materialized in the DOM, but all 3,486 offscreen text-like nodes already had non-empty payloads in application state.**
 
-The bottleneck was primarily materialization/rendering, not body availability.
+The bottleneck was therefore primarily UI materialization, not body availability.
 
----
+## Data path discovered
 
-## Architecture model
-
-The investigation separated four layers that initially looked like one thing.
+The investigation separated layers that initially looked like one thing:
 
 ```mermaid
 flowchart LR
@@ -343,15 +66,15 @@ flowchart LR
     C --> D[active path: 3,719 nodes]
     D --> E[ChatGPT renderability filter]
     E --> F[UI ledger: 3,529 positions]
-    F --> G[Virtualized DOM: ~56 text-like turns materialized in final test]
+    F --> G[Virtualized DOM: small materialized window]
 
     D --> H[Bulk local export]
     H --> I[Checksum + reconciliation]
     F --> I
-    I --> J[Targeted UI backfill only for gaps]
+    I --> J[Targeted UI backfill only for explicit gaps]
 ```
 
-The practical consequences are simple:
+The practical lessons were:
 
 ```text
 not visible in DOM ≠ absent from application state
@@ -360,148 +83,128 @@ empty IndexedDB ≠ empty JavaScript runtime state
 UI turn ledger ≠ complete conversation graph
 ```
 
----
+## Accepted implementation
 
-## Recovery design
+PR #15 implemented the bounded prototype with two complementary surfaces.
 
-The resulting prototype design is intentionally bulk-first and read-only.
+### Browser-side read-only exporter
 
-### 1. Discover the live data source without minified-name assumptions
+`tools/chatgpt_recovery_exporter.js`:
 
-The adapter should:
+- starts from a currently materialized turn with a valid React Fiber handle;
+- identifies a React Query-compatible `QueryClient` by method shape rather than minified constructor name;
+- locates the successful exact conversation query containing `mapping` and `current_node`;
+- reconstructs the `current_node` parent chain in chronological order;
+- preserves root/no-message, user, assistant, tool, and structured payload records;
+- computes a deterministic local SHA-256;
+- uses a local Blob download path;
+- performs no fetch/XHR bulk recovery and calls no QueryClient mutation method;
+- fails closed when required browser surfaces are missing or ambiguous.
 
-- start from one currently materialized turn with a valid React Fiber handle;
-- locate the shared QueryClient by behavioral/prototype shape;
-- locate the successful exact conversation query;
-- require `mapping` and `current_node` to exist;
-- fail closed if any expected surface is missing or ambiguous.
+### Verifier and reconciler
 
-### 2. Preserve the ordered active path
+`companion_mind/chatgpt_recovery.py` plus browser/Node helpers:
 
-Starting at `current_node`, follow `parent` links to root, detect cycles/missing parents, reverse to chronological order, and preserve at least:
+- validates active-path structure and fails closed on malformed/cyclic ancestry;
+- verifies deterministic artifact canonicalization and checksum;
+- exports a metadata-only renderable ledger;
+- reconciles by role + timestamp + monotonic order without requiring text similarity;
+- classifies `MATCHED / MISSING_FROM_BULK / EXTRA_GRAPH_NODE / AMBIGUOUS_MAPPING`;
+- emits an explicit machine-readable gap ledger;
+- scans for credential/header-shaped surfaces.
 
-```text
-path_index
-node_id
-parent_id
-children_ids
-message_id
-role
-content_type
-create_time
-content_parts
-metadata
-```
+The repository tests use synthetic public-safe fixtures only.
 
-Structured/non-string parts must remain structured rather than being silently coerced into text.
+## Final accepted validation
 
-### 3. Write an immutable local artifact
+The accepted live/local receipt on the target conversation was:
 
-The first recovery artifact should be local JSON/JSONL with:
+| Metric | Final result |
+|---|---:|
+| Mapping size | 3,775 |
+| Active path size | 3,719 |
+| Renderable ledger | 3,529 |
+| `MATCHED` | 3,523 |
+| `MISSING_FROM_BULK` | 5 |
+| `EXTRA_GRAPH_NODE` | 196 |
+| `AMBIGUOUS_MAPPING` | 1 |
+| Unresolved gap count | **6** |
+| Credential-shaped surfaces | 0 |
+| QueryClient mutation calls | 0 |
+| Network requests required for bulk path | 0 |
 
-- conversation provenance metadata;
-- graph and active-path counts;
-- ordered node records;
-- adapter/version marker;
-- canonical SHA-256 checksum.
-
-No remote upload is required for recovery.
-
-### 4. Reconcile against the 3,529-turn UI ledger
-
-The reconciler should classify records as:
-
-```text
-MATCHED
-MISSING_FROM_BULK
-EXTRA_GRAPH_NODE
-AMBIGUOUS_MAPPING
-```
-
-Stable identity and ordering should dominate; text similarity is only a weak fallback.
-
-### 5. Make slow UI work proportional to gap count
-
-Only unresolved `MISSING_FROM_BULK` or `AMBIGUOUS_MAPPING` entries should require sidebar/random-access materialization.
-
-This changes the operational cost from roughly:
+The exact-browser-JS recovery artifact checksum was:
 
 ```text
-O(all turns × UI wait)
+941f3680bbec035df3b33ed4ca179d9eb0ec1390f78763daa58632a246156966
 ```
 
-to:
+The final reconciliation and gap-ledger checksums were:
 
 ```text
-O(bulk local traversal) + O(gaps × UI wait)
+reconciliation: 546bb25026f7dfb2b2787216fe9247eecb0c1057ca9570d60a005a8494505f7c
+gap ledger:     3c77786cfe5be07c9728c5a16bd8a816a33415b6c6d6cc07d60ed94ebbb58073
 ```
 
----
+CI was GREEN on accepted head `968422c0b9e9106eb4bee15f998c5c488f0e14a4` (Actions Test #97 SUCCESS).
+
+Zero gaps were deliberately **not** an acceptance requirement. The first-prototype target was:
+
+> **Recover the bulk safely, identify every residual gap explicitly, and make the slow UI path proportional only to the gap count.**
+
+That gate passed. The remaining **5 missing + 1 ambiguous** items remain explicit known residuals and were not automatically backfilled.
 
 ## Safety and privacy boundary
 
-The recovered payload may contain private conversation content. The public repository therefore contains only structural evidence and synthetic fixtures.
+The recovered payload may contain private conversation content. The public implementation therefore preserves strict boundaries:
 
-The recovery path must not:
+- no recovered private conversation bodies are committed;
+- no cookies, Authorization headers, CSRF values, session tokens, or copied browser credentials are exported;
+- no QueryClient mutation method is used;
+- no hidden backend bulk-download path is used;
+- no recovered body data is uploaded to GitHub, CI artifacts, or external services;
+- public fixtures are synthetic;
+- public receipts report counts, hashes, typed failures, and structural states rather than private message text.
 
-- export or log cookies, authorization headers, CSRF values, or session tokens;
-- depend on copied browser credentials;
-- call QueryClient mutation methods such as `setQueryData`, `removeQueries`, `resetQueries`, `invalidateQueries`, or `clear`;
-- use hidden bulk backend requests as a download mechanism;
-- upload recovered conversation bodies to GitHub, CI artifacts, or external services;
-- publish private conversation IDs when avoidable;
-- treat an internal ChatGPT Web object layout as a stable public API.
+Formal ingestion of recovered private content into Canonical RAW/L0/Drive was outside Issue #10 and was not authorized by the prototype merge.
 
-Public validation should report counts, checksums, state transitions, and typed failures — not recovered private bodies.
+## What remains deliberately unclaimed
 
----
+The accepted result is a **bounded read-only prototype**, not a production integration. It does not claim:
 
-## Why the dead ends mattered
+- a production-quality or vendor-supported ChatGPT history API;
+- compatibility with future ChatGPT Web builds;
+- knowledge of the complete ChatGPT renderability predicate;
+- zero unresolved reconciliation gaps;
+- automatic targeted backfill of the residual 5 + 1 items;
+- production deployment or enterprise-grade reliability;
+- ingestion of private recovered conversation bodies into public or canonical archives.
 
-The failed hypotheses were not wasted work. Each one removed a class of unsafe or fragile implementation assumptions.
+Future browser builds may reorganize React state, query keys, or internal object shapes; the adapter must fail closed rather than guess.
 
-| Hypothesis | Test | Result | Design consequence |
-|---|---|---|---|
-| The visible XHRs contain conversation bodies | inspect payload/response | mostly telemetry/acknowledgement | do not build on those requests |
-| Empty DOM shell means missing message | compare virtualized DOM vs later materialization | false | DOM is a projection, not authority |
-| Conversation database name implies local history | count IndexedDB records | zero | schema presence is not data presence |
-| `content_type` alone reproduces visible turns | role × type reconciliation | mismatch | preserve graph first; filter later |
-| One selected Fiber node is durable | navigate/virtualize | node may be replaced | rediscover and validate live handles |
-| Offscreen graph nodes may be metadata-only | inspect `content.parts` shape/count | 3,486/3,486 populated | bulk recovery gate passes |
+## Why the failed hypotheses mattered
 
-The recurring method was:
+The investigation deliberately tested and rejected several tempting shortcuts before implementation:
 
-> **Form a small hypothesis, design a read-only falsification test, record a number or structural fact, and only then make the next architectural claim.**
+- visible XHR/fetch traffic was mostly telemetry/acknowledgement in the observed path;
+- thousands of empty DOM shells were virtualization artifacts, not proof of missing bodies;
+- promising browser database names existed while candidate stores contained zero records;
+- `content_type` alone did not reproduce the UI's renderability rule;
+- one selected Fiber node was not a durable record because virtualization could replace it.
 
----
+Those dead ends removed unsafe or fragile assumptions and led to the more reusable debugging rule:
 
-## Evidence boundaries and limitations
+> **Form a small hypothesis, design a read-only falsification test, record a structural fact or number, and only then make the next architectural claim.**
 
-### Established in the observed session
+## Historical investigation record
 
-- an ordered 3,529-position renderable-turn vector existed;
-- a React Query `QueryClient`-compatible shared context was reachable;
-- a successful exact conversation query exposed `mapping` and `current_node`;
-- `mapping` contained 3,775 nodes;
-- the active parent path contained 3,719 nodes without a detected cycle;
-- 3,486 currently offscreen text-like nodes all had non-empty payloads;
-- the bulk-first recovery design was therefore feasible in principle.
+The original 519-line pre-implementation forensic write-up is preserved separately rather than silently rewritten after the prototype succeeded:
 
-### Not yet established by this case study alone
+[Read the original investigation notes](chatgpt-long-conversation-recovery-investigation-notes.md)
 
-- a production-quality exporter has not yet been accepted;
-- the exact 3,719 ↔ 3,529 reconciliation has not yet been automated end to end;
-- the complete ChatGPT renderability predicate is not known;
-- future ChatGPT Web builds may reorganize React state or query keys;
-- this work does not expose or claim a supported OpenAI API for consumer ChatGPT history.
+That document records the discovery path and the pre-implementation limitations as they were understood before PR #15 was accepted. This page is the current post-implementation case study and should be used for current status claims.
 
-Implementation and synthetic tests are tracked in [Issue #10](https://github.com/aerenkolstein-code/Companion-Mind/issues/10).
-
----
-
-## What this demonstrates
-
-The most reusable result is not a particular internal property name. It is the debugging pattern.
+## Final principle
 
 A seemingly impossible UI-recovery problem became tractable after separating:
 
@@ -512,8 +215,6 @@ application state
 UI projection
 ```
 
-and after refusing to equate "not currently visible" with "not present."
-
-The final recovery principle is:
+and refusing to equate "not currently visible" with "not present."
 
 > **Preserve the richer graph first. Reconcile presentation later. Make the slow path proportional only to the gaps.**

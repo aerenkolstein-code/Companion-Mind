@@ -1,0 +1,92 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://companion-mind.example/schemas/canonical_event_v1.schema.json",
+  "title": "Companion-Mind Canonical Event / RAW Contract v1",
+  "description": "Phase-0 event evidence contract. Journal evidence is not Current, Memory, Persona Authority, or Relationship Authority.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "event_id", "session_id", "turn_id", "sequence_no", "actor_role",
+    "message_id", "persona_id", "relationship_id", "provider", "model",
+    "observed_at", "created_at", "content_type", "content_payload", "status",
+    "source_ref", "attachment_ref", "correction_id", "correction_of",
+    "redaction_state", "metadata"
+  ],
+  "properties": {
+    "event_id": {"type": "string", "minLength": 1},
+    "session_id": {"type": "string", "minLength": 1},
+    "turn_id": {"type": "string", "minLength": 1},
+    "sequence_no": {"type": "integer", "minimum": 0},
+    "actor_role": {"enum": ["user", "assistant", "tool", "system-derived-visible-event"]},
+    "message_id": {"$ref": "#/$defs/nullableNonEmptyString"},
+    "persona_id": {"$ref": "#/$defs/nullableNonEmptyString"},
+    "relationship_id": {"$ref": "#/$defs/nullableNonEmptyString"},
+    "provider": {"$ref": "#/$defs/nullableNonEmptyString"},
+    "model": {"$ref": "#/$defs/nullableNonEmptyString"},
+    "observed_at": {"type": "string", "format": "date-time"},
+    "created_at": {"type": "string", "format": "date-time"},
+    "content_type": {"type": "string", "minLength": 1},
+    "content_payload": {},
+    "status": {"enum": ["complete", "partial", "failed"]},
+    "source_ref": {"$ref": "#/$defs/sourceRef"},
+    "attachment_ref": {"type": "array", "items": {"$ref": "#/$defs/attachmentRef"}},
+    "correction_id": {"$ref": "#/$defs/nullableNonEmptyString"},
+    "correction_of": {"$ref": "#/$defs/nullableNonEmptyString"},
+    "redaction_state": {"enum": ["none", "redacted", "not_applicable"]},
+    "metadata": {"$ref": "#/$defs/metadata"}
+  },
+  "$defs": {
+    "nullableNonEmptyString": {
+      "anyOf": [
+        {"type": "string", "minLength": 1},
+        {"type": "null"}
+      ]
+    },
+    "sourceRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["source_kind", "observation_type", "source_id"],
+      "properties": {
+        "source_kind": {"enum": ["owned_client", "browser_sidecar", "historical_backfill", "correction", "replay", "derived"]},
+        "observation_type": {"enum": ["observed", "imported", "corrected", "replayed", "inferred", "projected"]},
+        "source_id": {"type": "string", "minLength": 1},
+        "uri": {"$ref": "#/$defs/nullableNonEmptyString"},
+        "adapter_version": {"$ref": "#/$defs/nullableNonEmptyString"}
+      }
+    },
+    "attachmentRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["attachment_id", "media_type", "source_ref"],
+      "properties": {
+        "attachment_id": {"type": "string", "minLength": 1},
+        "media_type": {"type": "string", "minLength": 1},
+        "source_ref": {"type": "string", "minLength": 1},
+        "sha256": {"type": ["string", "null"], "pattern": "^[A-Fa-f0-9]{64}$"}
+      }
+    },
+    "knowledgeValue": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["state"],
+      "properties": {
+        "state": {"enum": ["KNOWN_VALUE", "KNOWN_EMPTY", "UNKNOWN", "N_A", "NOT_LOOKED_UP"]},
+        "value": {}
+      }
+    },
+    "metadata": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "adapter": {"type": "string", "minLength": 1},
+        "adapter_version": {"type": "string", "minLength": 1},
+        "ingest_id": {"type": "string", "minLength": 1},
+        "knowledge": {
+          "type": "object",
+          "additionalProperties": {"$ref": "#/$defs/knowledgeValue"}
+        },
+        "extensions": {"type": "object", "additionalProperties": true}
+      }
+    }
+  }
+}
