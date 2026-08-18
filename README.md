@@ -6,13 +6,17 @@
 
 ## Current engineering focus
 
-Companion-Mind is the **A1 / Build the system** repository for the approved **Persistent AI Companion** product direction. The long-term product goal is a companion that can preserve identity, shared history, relationship state, and bounded initiative across time, sessions, and model changes while the underlying foundation model remains a replaceable cognition provider.
+Companion-Mind is the **A1 / Build the system** repository for a **personal-first owned-runtime path**. The current product-engineering sequence is intentionally narrower than a commercial product roadmap: first make state and history durable, then build an owned client/runtime that can assemble context, retrieve the right authority, adapt to different model capabilities, and support long-running real work without depending on a vendor chat UI.
 
-**Phase 0 — Canonical Event & Runtime Boundary Contract v1** has landed on `main` and Gate P0 is GREEN. It freezes the shared event contract and ownership boundary for Journal / Current / Memory / Persona-Relationship state. Durable Journal / Phase 1 and the higher Persistent Companion runtime remain separately gated and are **not claimed as implemented here**.
+**Phase 0 — Canonical Event & Runtime Boundary Contract v1** has landed on `main` and Gate P0 is GREEN. It freezes the shared event contract and ownership boundary for Journal / Current / Memory / Persona-Relationship state. **Phase 1 — Durable Journal** is the next gated engineering increment and is **not claimed as implemented here**.
+
+After a future Durable Journal / E1 gate, the public roadmap moves toward owned-client foundations: local client shell, context assembly, retrieval/authority routing, model gateway/capability adaptation, and auditable context/tool traces. Only after sustained longitudinal dogfooding would productization be reconsidered from evidence; the repository does not currently claim a commercial Alpha, billing path, or fixed commercial product shape.
 
 Separately, the bounded read-only **C2 long-conversation recovery prototype** has landed on `main`. It can recover an already-hydrated ChatGPT Web conversation graph locally, checksum the artifact, and reconcile it against a renderable-turn ledger while leaving residual gaps explicit. This is an experimental browser-forensics/recovery artifact, **not** a production ChatGPT integration or a supported OpenAI API.
 
-The `main` branch remains the stable, reproducible **First Closed Loop** artifact plus the published Phase 0 contract and accepted C2 prototype. Product-level Durable Journal and higher Persistent Companion runtime work remain future gated increments, not completion claims.
+The `main` branch remains the stable, reproducible **First Closed Loop** artifact plus the published Phase 0 contract and accepted C2 prototype. Durable Journal and higher owned-runtime/client work remain future gated increments, not completion claims.
+
+[Read the current public-safe roadmap](docs/current-roadmap.md).
 
 The paired [LLM Evaluation Lab](https://github.com/aerenkolstein-code/llm-evaluation-lab) is the A2 / measurement counterpart: Companion-Mind builds the system; LLM Evaluation Lab measures whether it actually improves.
 
@@ -142,6 +146,7 @@ companion-mind demo --mitigation-spec /tmp/mitigation.json
 - `tools/chatgpt_recovery_exporter.js` — local read-only browser exporter for the accepted C2 prototype
 - `tests/test_runtime.py` — contract, safeguard, persistence, replay, and state tests
 - `schemas/evaluation_case.schema.json` — shared evaluation contract
+- `docs/current-roadmap.md` — public-safe current product-engineering sequence and non-claims
 - `docs/case-studies/chatgpt-long-conversation-recovery.md` — current public-safe C2 case study and accepted outcome
 - `docs/case-studies/chatgpt-long-conversation-recovery-investigation-notes.md` — original pre-implementation forensic investigation record
 - `docs/history/README.md` — audited Gen1 migration ledger
