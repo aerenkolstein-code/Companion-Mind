@@ -4,21 +4,37 @@
 
 [![Test](https://github.com/aerenkolstein-code/Companion-Mind/actions/workflows/test.yml/badge.svg)](https://github.com/aerenkolstein-code/Companion-Mind/actions/workflows/test.yml)
 
+## Production-line model
+
+The project uses **production-line names**, not repository aliases.
+
+### Core production lines
+
+- **A1 — Build Line.** The primary Companion-Mind system-development line. A1 builds the runtime and its durable state, context, retrieval, continuity, model-adaptation, and owned-client capabilities.
+- **A2 — Companion Evaluation Line.** A1's independent companion-evaluation line. A2 exists where an explicit A1 milestone must wait for independent evaluation evidence before A1 can proceed, revise, roll back, or hold. A typical dependency is `A1 candidate → WAIT-A2 → A2 evidence → A1 decision`.
+
+> **A1 builds. A2 independently verifies when A1 needs evidence before proceeding.**
+
+### Other workstreams
+
+- **B — Independent Evaluation Line.** Evaluation work that can stand on its own without becoming an A1 gate. Search Cup is one B-line project; B is not synonymous with Search Cup.
+- **C1 / C2 — Tooling Lines.** Engineering-tool lines that build tools for the construction and operation of the Companion-Mind and LLM Evaluation Lab repositories. Their current tools do not define the lines themselves.
+
+Repository placement does not define line identity. Companion-Mind primarily hosts A1 implementation artifacts and may also host tooling or cross-line artifacts when appropriate. The paired [LLM Evaluation Lab](https://github.com/aerenkolstein-code/llm-evaluation-lab) hosts A2 evidence and B-line evaluation work. **Line defines responsibility and dependency; repository defines where artifacts live.**
+
 ## Current engineering focus
 
-Companion-Mind is the **A1 / Build the system** repository for a **personal-first owned-runtime path**. The current product-engineering sequence is intentionally narrower than a commercial product roadmap: first make state and history durable, then build an owned client/runtime that can assemble context, retrieve the right authority, adapt to different model capabilities, and support long-running real work without depending on a vendor chat UI.
+The current A1 product-engineering sequence follows a **personal-first owned-runtime path**. It is intentionally narrower than a commercial product roadmap: first make state and history durable, then build an owned client/runtime that can assemble context, retrieve the right authority, adapt to different model capabilities, and support long-running real work without depending on a vendor chat UI.
 
 **Phase 0 — Canonical Event & Runtime Boundary Contract v1** has landed on `main` and Gate P0 is GREEN. It freezes the shared event contract and ownership boundary for Journal / Current / Memory / Persona-Relationship state. **Phase 1 — Durable Journal** is the next gated engineering increment and is **not claimed as implemented here**.
 
 After a future Durable Journal / E1 gate, the public roadmap moves toward owned-client foundations: local client shell, context assembly, retrieval/authority routing, model gateway/capability adaptation, and auditable context/tool traces. Only after sustained longitudinal dogfooding would productization be reconsidered from evidence; the repository does not currently claim a commercial Alpha, billing path, or fixed commercial product shape.
 
-Separately, the bounded read-only **C2 long-conversation recovery prototype** has landed on `main`. It can recover an already-hydrated ChatGPT Web conversation graph locally, checksum the artifact, and reconcile it against a renderable-turn ledger while leaving residual gaps explicit. This is an experimental browser-forensics/recovery artifact, **not** a production ChatGPT integration or a supported OpenAI API.
+Separately, the bounded read-only **C2 long-conversation recovery prototype** has landed on `main`. It can recover an already-hydrated ChatGPT Web conversation graph locally, checksum the artifact, and reconcile it against a renderable-turn ledger while leaving residual gaps explicit. This is an experimental browser-forensics/recovery artifact, **not** a production ChatGPT integration or a supported OpenAI API. C2 is a tooling line; this recovery prototype is one C2 project, not the definition of C2 itself.
 
 The `main` branch remains the stable, reproducible **First Closed Loop** artifact plus the published Phase 0 contract and accepted C2 prototype. Durable Journal and higher owned-runtime/client work remain future gated increments, not completion claims.
 
 [Read the current public-safe roadmap](docs/current-roadmap.md).
-
-The paired [LLM Evaluation Lab](https://github.com/aerenkolstein-code/llm-evaluation-lab) is the A2 / measurement counterpart: Companion-Mind builds the system; LLM Evaluation Lab measures whether it actually improves.
 
 ## First Closed Loop
 
@@ -43,7 +59,7 @@ flowchart LR
   E --> F[Decision Trace]
 ```
 
-Companion-Mind implements the protection. The paired [LLM Evaluation Lab](https://github.com/aerenkolstein-code/llm-evaluation-lab) tests whether that protection works.
+Companion-Mind implements the protection. At this milestone, the paired [LLM Evaluation Lab](https://github.com/aerenkolstein-code/llm-evaluation-lab) supplies the independent A2 evidence used to test whether that protection works.
 
 `CM-GUARD-001` addresses **Premature Parent Closure**: a parent goal must not be marked `DONE` while any required child remains open, unknown, waiting, blocked, or pending. The guard reads structured child state before permitting the write.
 
