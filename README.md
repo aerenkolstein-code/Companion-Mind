@@ -102,11 +102,17 @@ companion-mind replay --event-log "$event_dir/events.jsonl" > "$event_dir/replay
 cmp "$event_dir/live.json" "$event_dir/replayed.json"
 ```
 
-The demo writes five synthetic events, blocks the first closure request while a required agenda item is open, accepts closure after that item becomes terminal, and then proves that a clean replay reconstructs the same state and traces.
+The demo writes five synthetic events, blocks the first closure request while a
+required agenda item is open, accepts closure after that item becomes terminal,
+and then proves that a clean replay reconstructs the same state and traces.
 
 ## Executable MitigationSpec v0.3
 
-The runtime can load the JSON contract emitted by LLM Evaluation Lab. It validates the schema version, target failure, guard type, decision mapping and status sets before registering `CM-GUARD-001`. Unsupported or ambiguous specs fail closed. A canonical SHA-256 fingerprint is included in runtime snapshots so the evaluation report can prove which configuration actually ran.
+The runtime can now load the JSON contract emitted by LLM Evaluation Lab. It
+validates the schema version, target failure, guard type, decision mapping and
+status sets before registering `CM-GUARD-001`. Unsupported or ambiguous specs
+fail closed. A canonical SHA-256 fingerprint is included in runtime snapshots so
+the evaluation report can prove which configuration actually ran.
 
 ```bash
 llm-eval --emit-mitigation /tmp/mitigation.json --output /tmp/evaluation.json
