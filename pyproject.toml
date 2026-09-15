@@ -14,3 +14,6 @@ companion-mind = "companion_mind.runtime:main"
 
 [tool.setuptools.packages.find]
 include = ["companion_mind*"]
+
+[tool.setuptools.data-files]
+"share/companion-mind/schemas" = ["schemas/canonical_event_v1.schema.json"]
