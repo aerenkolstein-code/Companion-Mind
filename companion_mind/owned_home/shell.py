@@ -1,0 +1,167 @@
+"""Loopback-only, unprivileged P2-S1 local Web shell.
+
+python -m companion_mind.owned_home.shell --store DIR --port 8765
+Open the printed loopback URL. Synthetic fixture/grant setup belongs to the
+trusted process; browser ingress can only submit/recover its fixed owner scope.
+No production provider, credentials, filesystem browsing or connector routes.
+"""
+import argparse
+from http.server import BaseHTTPRequestHandler, HTTPServer
+import json
+from pathlib import Path
+import sys
+
+from companion_mind.journal import JournalError
+from .contracts import (VERSION, AuthorityFixture, Grant, HomeError, Scope, Turn,
+                        encode, exact_keys)
+from .runtime import OwnedRuntime
+
+SCOPE = Scope("synthetic-home", "synthetic-owner")
+FIXTURE = AuthorityFixture("local-demo", "v1", SCOPE.universe_id, SCOPE.access_subject_id,
+                           "The local synthetic archive contains one evidence item.")
+GRANT = Grant(SCOPE.universe_id, SCOPE.access_subject_id, FIXTURE.source_id, FIXTURE.version)
+
+HTML = """<!doctype html><html lang="en"><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Companion-Mind · Local slice</title>
+<body><main><h1>Companion-Mind</h1><p>Local synthetic workspace</p>
+<form id="form"><label for="message">Your message</label><br>
+<textarea id="message" rows="5" cols="64" maxlength="8000" required></textarea><br>
+<button id="submit">Send</button><button id="resume" type="button" hidden>Resume pending turn</button>
+<button id="next" type="button" hidden>New turn</button></form>
+<p id="status" role="status"></p><pre id="reply"></pre></main><script src="/app.js"></script></body></html>"""
+
+JS = """'use strict';
+const $ = id => document.getElementById(id);
+const key = 'owned-home-v1:' + location.origin;
+let pending = null;
+try { pending = JSON.parse(localStorage.getItem(key)); } catch (_) {}
+function render(r) {
+  $('status').textContent = r.stop_reason || r.status;
+  $('reply').textContent = r.visible_reply || '';
+  const waiting = r.status === 'AWAIT_EXPLICIT_RESUME';
+  $('resume').hidden = !waiting;
+  $('next').hidden = waiting || r.status === 'NOT_FOUND';
+}
+async function call(body) {
+  const response = await fetch('/v1/turn', {method:'POST',
+    headers:{'Content-Type':'application/json','X-Owned-Home':'1'},body:JSON.stringify(body)});
+  const data = await response.json();
+  if (!data.ok) throw new Error(data.error);
+  render(data.result); return data.result;
+}
+function report(error) { $('status').textContent = error.message; }
+$('form').addEventListener('submit', async e => {
+  e.preventDefault(); $('submit').disabled = true;
+  try {
+    if (!pending) {
+      const id = crypto.randomUUID();
+      pending = {contract_version:'owned-home/1',request_id:id,session_id:id,
+        turn_id:id,turn_no:1,universe_id:'synthetic-home',access_subject_id:'synthetic-owner',
+        source_id:'local-demo',source_version:'v1',text:$('message').value,
+        observed_at:new Date().toISOString(),budget_bytes:16384};
+      localStorage.setItem(key,JSON.stringify(pending));
+    }
+    await call({contract_version:'owned-home/1',op:'turn',turn:pending});
+  } catch (error) { report(error); } finally { $('submit').disabled = false; }
+});
+$('resume').addEventListener('click', () => call({contract_version:'owned-home/1',op:'turn',turn:pending,resume:true}).catch(report));
+$('next').addEventListener('click', () => {
+  pending = null; localStorage.removeItem(key); $('message').value = '';
+  $('next').hidden = true; $('reply').textContent = ''; $('status').textContent = '';
+});
+if (pending) {
+  $('message').value = pending.text;
+  call({contract_version:'owned-home/1',op:'observe',request_id:pending.request_id}).catch(report);
+}
+"""
+
+
+def make_server(directory, *, host="127.0.0.1", port=0):
+    if host != "127.0.0.1":
+        raise HomeError("LOOPBACK_ONLY")
+    if type(port) is not int or not 0 <= port <= 65535:
+        raise HomeError("INVALID_PORT")
+    directory = Path(directory)
+
+    class Handler(BaseHTTPRequestHandler):
+        def log_message(self, *_):
+            pass  # Request/user content is not a second access-log RAW.
+
+        def _origin(self):
+            authority = "127.0.0.1:" + str(self.server.server_port)
+            if self.headers.get_all("Host") != [authority]:
+                return False
+            origins = self.headers.get_all("Origin")
+            return (origins is None or origins == ["http://" + authority]) and self.headers.get("Sec-Fetch-Site") != "cross-site"
+
+        def _send(self, status, body, content_type="application/json"):
+            payload = body.encode("utf-8")
+            self.send_response(status)
+            self.send_header("Content-Type", content_type + "; charset=utf-8")
+            self.send_header("Content-Length", str(len(payload)))
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("X-Content-Type-Options", "nosniff")
+            self.send_header("Content-Security-Policy", "default-src 'none'; script-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'")
+            self.end_headers()
+            self.wfile.write(payload)
+
+        def do_GET(self):
+            if not self._origin():
+                return self._send(403, encode({"ok": False, "error": "ORIGIN_DENIED"}))
+            if self.path == "/":
+                return self._send(200, HTML, "text/html")
+            if self.path == "/app.js":
+                return self._send(200, JS, "application/javascript")
+            self._send(404, encode({"ok": False, "error": "ROUTE_NOT_FOUND"}))
+
+        def do_POST(self):
+            if not self._origin() or self.headers.get("X-Owned-Home") != "1":
+                return self._send(403, encode({"ok": False, "error": "ORIGIN_DENIED"}))
+            if self.path != "/v1/turn":
+                return self._send(404, encode({"ok": False, "error": "ROUTE_NOT_FOUND"}))
+            try:
+                lengths = self.headers.get_all("Content-Length") or []
+                if len(lengths) != 1 or self.headers.get("Transfer-Encoding") is not None:
+                    raise HomeError("INVALID_LENGTH")
+                length = int(lengths[0])
+                if not 0 < length <= 65536 or self.headers.get("Content-Type") != "application/json":
+                    raise HomeError("INVALID_BODY")
+                self.connection.settimeout(3)
+                body = json.loads(self.rfile.read(length))
+                op = body.get("op")
+                if op == "turn":
+                    exact_keys(body, ("contract_version", "op", "turn"), ("resume",))
+                elif op == "observe":
+                    exact_keys(body, ("contract_version", "op", "request_id"))
+                else:
+                    raise HomeError("OPERATION_NOT_IN_SLICE")
+                if body["contract_version"] != VERSION:
+                    raise HomeError("CONTRACT_VERSION_MISMATCH")
+                with OwnedRuntime(directory, scope=SCOPE, fixtures=[FIXTURE], grants=[GRANT]) as runtime:
+                    result = (runtime.submit(Turn(**body["turn"]), resume=body.get("resume", False))
+                              if op == "turn" else runtime.observe(body["request_id"]))
+                self._send(200, encode({"ok": True, "result": result}))
+            except Exception as exc:
+                code = str(exc) if isinstance(exc, (HomeError, JournalError)) else "INVALID_REQUEST"
+                self._send(400, encode({"ok": False, "error": code}))
+
+    return HTTPServer((host, port), Handler)
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--store", required=True)
+    parser.add_argument("--port", type=int, default=8765)
+    args = parser.parse_args()
+    with make_server(args.store, port=args.port) as server:
+        print("http://127.0.0.1:" + str(server.server_port), flush=True)
+        try:
+            server.serve_forever()
+        except KeyboardInterrupt:
+            pass
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
