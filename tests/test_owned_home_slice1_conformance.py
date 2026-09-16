@@ -33,6 +33,77 @@ from companion_mind.owned_home.testport import execute
 MATRIX = {}
 SCOPE = {"universe_id": "synthetic-home", "access_subject_id": "synthetic-owner"}
 
+# Execute the served, exact app.js in a fresh JS realm on every reload. DOM and
+# storage are instrumented; fetch crosses the real loopback HTTP boundary. Node
+# is already required by the repository CI; no browser/runtime package is added.
+BROWSER_HARNESS = r"""
+const vm = require('node:vm');
+const {webcrypto} = require('node:crypto');
+let input = '';
+process.stdin.setEncoding('utf8');
+process.stdin.on('data', chunk => input += chunk);
+process.stdin.on('end', async () => {
+  const config = JSON.parse(input), storage = new Map(Object.entries(config.storage || {}));
+  const writes = [], calls = [], states = [];
+  const key = 'owned-home-v1:' + config.origin;
+  let elements, listeners, active, drop = null;
+  const forbidden = () => { throw new Error('PERSISTENT_API_FORBIDDEN'); };
+  async function settle() {
+    do {
+      await Promise.allSettled([...active]);
+      await new Promise(resolve => setImmediate(resolve));
+    } while (active.size);
+  }
+  async function load() {
+    elements = Object.fromEntries(['form','message','submit','resume','next','status','reply']
+      .map(id => [id, {value:'',textContent:'',disabled:false,hidden:['resume','next'].includes(id),
+        handlers:{},addEventListener(event, fn) { this.handlers[event] = fn; }}]));
+    listeners = {}; active = new Set();
+    const document = {getElementById:id => elements[id]};
+    Object.defineProperty(document, 'cookie', {get:forbidden,set:forbidden});
+    const context = vm.createContext({document, location:{origin:config.origin}, crypto:webcrypto,
+      localStorage:{getItem:k => storage.get(k) ?? null,
+        setItem(k,v) { writes.push([String(k),String(v)]); storage.set(String(k),String(v)); },
+        removeItem:k => storage.delete(k)},
+      sessionStorage:{getItem:forbidden,setItem:forbidden,removeItem:forbidden},
+      indexedDB:{open:forbidden}, caches:{open:forbidden},
+      addEventListener:(event,fn) => listeners[event] = fn,
+      fetch:(path,options) => {
+        const mode = drop; drop = null;
+        const record = {body:JSON.parse(options.body)}; calls.push(record);
+        const task = (async () => {
+          if (mode === 'before') throw new Error('SYNTHETIC_TRANSPORT_LOSS');
+          const response = await fetch(config.origin + path, options);
+          record.status = response.status; record.data = await response.json();
+          if (mode === 'after') throw new Error('SYNTHETIC_TRANSPORT_LOSS');
+          return {json:async () => record.data};
+        })();
+        active.add(task); task.then(() => active.delete(task), () => active.delete(task));
+        return task;
+      }});
+    vm.runInContext(config.script, context);
+    await settle();
+  }
+  await load();
+  for (const step of config.steps) {
+    if (step.event === 'reload') {
+      if (listeners.pagehide) listeners.pagehide();
+      await load();
+    } else if (step.event !== 'inspect') {
+      if ('text' in step) elements.message.value = step.text;
+      drop = step.drop || null;
+      const target = step.event === 'submit' ? 'form' : step.event;
+      await elements[target].handlers[step.event === 'submit' ? 'submit' : 'click']({preventDefault(){}});
+      await settle();
+    }
+    states.push({status:elements.status.textContent, reply:elements.reply.textContent,
+      message:elements.message.value, resume_hidden:elements.resume.hidden,
+      next_hidden:elements.next.hidden, storage:Object.fromEntries(storage), calls:calls.length});
+  }
+  process.stdout.write(JSON.stringify({writes,calls,states,key}));
+});
+"""
+
 
 def request(number=1):
     return {"contract_version": VERSION, "scope": dict(SCOPE),
@@ -119,11 +190,21 @@ class Slice1Conformance(unittest.TestCase):
             self.assertEqual(r["event_count"], 1)
             self.assertEqual(r["counters"]["cognition_stub_invocations"], 0)
             self.assertIsNone(r["visible_reply"])
-        resumed = self.child(req | {"resume": True})
+        wrong_scope = operation(req, "resume", request_id="req-1")
+        wrong_scope["scope"]["universe_id"] = "other-universe"
+        self.assertEqual(json.loads(process(self.store, wrong_scope).stdout)["error"], "RESUME_TARGET_MISSING")
+        resumed = self.child(operation(req, "resume", request_id="req-1"))
         self.assertEqual(resumed["status"], "complete")
         self.assertEqual(resumed["user_event_id"], pending["user_event_id"])
         self.assertEqual(resumed["terminal_count"], 1)
-        self.passed("TS1-03", restarts=3, implicit_invocations=0, explicit_resume="PASS")
+        # Both the original full-turn seam and the content-free handle seam
+        # replay the same terminal without another invocation.
+        for again in (self.child(req | {"resume": True}),
+                      self.child(operation(req, "resume", request_id="req-1"))):
+            self.assertEqual(again["assistant_event_id"], resumed["assistant_event_id"])
+            self.assertEqual(again["counters"]["cognition_stub_invocations"], 0)
+        self.passed("TS1-03", restarts=3, implicit_invocations=0, explicit_resume="PASS",
+                    handle_resume_scope="ENFORCED", handle_resume_content_source="A019")
 
     def test_ts1_04_uniqueness_and_unknown_recovery(self):
         req = request()
@@ -288,6 +369,99 @@ class Slice1Conformance(unittest.TestCase):
         self.assertIn("localStorage", script)
         self.assertIn("textContent", script)
         self.assertNotIn("innerHTML", script)
+
+        def browser(steps, storage=None):
+            child = subprocess.run(["node", "-e", BROWSER_HARNESS], cwd=ROOT,
+                input=encode({"origin": f"http://127.0.0.1:{port}", "script": script,
+                              "steps": steps, "storage": storage or {}}),
+                capture_output=True, text=True, timeout=20)
+            self.assertEqual(child.returncode, 0, child.stderr)
+            return json.loads(child.stdout)
+
+        def handles_only(result):
+            self.assertTrue(result["writes"])
+            for key, value in result["writes"]:
+                self.assertEqual(key, result["key"])
+                handle = json.loads(value)
+                self.assertEqual(set(handle), {"request_id"})
+                self.assertRegex(handle["request_id"], r"^[0-9a-f-]{36}$")
+
+        canary = "SYNTHETIC-BROWSER-NON-CREDENTIAL-CANARY"
+        for prefix in ("api_key=", "password=", "Bearer "):
+            rejected = browser([{"event": "submit", "text": prefix + canary}])
+            self.assertEqual(rejected["calls"][0]["data"], {"ok": False, "error": "UNSAFE_INPUT"})
+            leaks = sum(canary in value for _, value in rejected["writes"])
+            self.assertEqual(leaks, 0, "Credential-shaped input reached browser storage before rejection")
+            self.assertFalse(self.store.exists(), "Rejected input must not open persistent runtime storage")
+            self.assertEqual(rejected["states"][0]["message"], "")
+            handles_only(rejected)
+
+        plain = "PUBLIC-RAW-MESSAGE-MUST-NOT-ENTER-BROWSER-STORAGE"
+        completed = browser([{"event": "submit", "text": plain}, {"event": "reload"}])
+        handles_only(completed)
+        self.assertNotIn(plain, encode(completed["writes"]))
+        first_ui, reloaded_ui = [c["data"]["result"] for c in completed["calls"]]
+        self.assertEqual(first_ui["assistant_event_id"], reloaded_ui["assistant_event_id"])
+        self.assertEqual(reloaded_ui["counters"]["cognition_stub_invocations"], 0)
+        self.assertEqual(completed["states"][1]["message"], "")
+
+        lost = browser([{"event": "submit", "text": plain, "drop": "before"},
+                        {"event": "reload"}, {"event": "submit", "text": plain}])
+        handles_only(lost)
+        self.assertEqual(lost["calls"][1]["data"]["result"]["status"], "NOT_FOUND")
+        self.assertEqual(lost["states"][1]["message"], "")
+        sent = [c["body"]["turn"] for c in lost["calls"] if c["body"]["op"] == "turn"]
+        for field in ("request_id", "session_id", "turn_id"):
+            self.assertEqual(sent[0][field], sent[1][field])
+        self.assertEqual(lost["calls"][-1]["data"]["result"]["terminal_count"], 1)
+
+        delivered = browser([{"event": "submit", "text": plain, "drop": "after"},
+                             {"event": "reload"}])
+        handles_only(delivered)
+        self.assertEqual([c["body"]["op"] for c in delivered["calls"]], ["turn", "observe"])
+        a, b = [c["data"]["result"] for c in delivered["calls"]]
+        self.assertEqual(a["assistant_event_id"], b["assistant_event_id"])
+        self.assertEqual(b["terminal_count"], 1)
+        self.assertEqual(b["counters"]["cognition_stub_invocations"], 0)
+
+        # Real subprocess exit after USER durable, then content-free reload and
+        # explicit resume over HTTP. Only A019 can supply the original content.
+        orphan = request()
+        orphan_id = "11111111-1111-4111-8111-111111111111"
+        orphan["turn"].update(request_id=orphan_id, session_id=orphan_id, turn_id=orphan_id, text=plain)
+        self.assertEqual(process(self.store, orphan, fault="AFTER_USER_DURABLE").returncode, 86)
+        before = self.call(operation(orphan, "observe", request_id=orphan_id))
+        stored_handle = {completed["key"]: encode({"request_id": orphan_id})}
+        resumed = browser([{"event": "inspect"}, {"event": "reload"},
+                           {"event": "resume"}, {"event": "reload"}], stored_handle)
+        handles_only(resumed)
+        self.assertEqual([c["body"]["op"] for c in resumed["calls"]], ["observe", "observe", "resume", "observe"])
+        for observed in resumed["calls"][:2]:
+            r = observed["data"]["result"]
+            self.assertEqual((r["status"], r["external_outcome"]), ("AWAIT_EXPLICIT_RESUME", "NOT_SENT"))
+            self.assertEqual(r["counters"]["cognition_stub_invocations"], 0)
+        self.assertNotIn(plain, encode([c["body"] for c in resumed["calls"]]))
+        after = resumed["calls"][-1]["data"]["result"]
+        self.assertEqual(after["receipts"]["user"]["fingerprint"], before["receipts"]["user"]["fingerprint"])
+        self.assertEqual((after["status"], after["terminal_count"]), ("complete", 1))
+        self.assertEqual(after["user_event_id"], before["user_event_id"])
+        self.assertEqual(resumed["calls"][2]["data"]["result"]["counters"]["cognition_stub_invocations"], 1)
+        self.assertEqual(after["counters"]["cognition_stub_invocations"], 0)
+
+        # Upgrade cleanup discards every legacy field, retaining only a valid
+        # generated identity. Neither old content nor forged IDs are re-written.
+        legacy = dict(orphan["turn"], text="password=" + canary)
+        upgraded = browser([{"event": "reload"}], {completed["key"]: encode(legacy)})
+        handles_only(upgraded)
+        self.assertNotIn(canary, encode(upgraded["writes"]) + encode(upgraded["states"]))
+        forged = browser([{"event": "inspect"}],
+                         {completed["key"]: encode({"request_id": "password=" + canary, "text": plain})})
+        self.assertEqual(forged["writes"], [])
+        self.assertEqual(forged["states"][0]["storage"], {})
+        self.assertEqual(forged["calls"], [])
+
+        # A public safe export has no secret/raw bodies, including rejected input.
+        self.assertNotIn(canary, encode(self.call(operation(request(), "safe_export"))))
         body = {"contract_version": VERSION, "op": "turn", "turn": request()["turn"]}
         code, response = http("POST", "/v1/turn", body)
         self.assertEqual(code, 200, response)
@@ -298,12 +472,21 @@ class Slice1Conformance(unittest.TestCase):
         self.assertEqual(second["terminal_count"], 1)
         observe = {"contract_version": VERSION, "op": "observe", "request_id": "req-1"}
         self.assertEqual(json.loads(http("POST", "/v1/turn", observe)[1])["result"]["request_id"], "req-1")
+        resumed_again = json.loads(http("POST", "/v1/turn", observe | {"op": "resume"})[1])["result"]
+        self.assertEqual(resumed_again["assistant_event_id"], first["assistant_event_id"])
+        self.assertEqual(resumed_again["counters"]["cognition_stub_invocations"], 0)
+        self.assertEqual(http("POST", "/v1/turn", observe | {"op": "resume", "text": plain})[0], 400)
+        self.assertEqual(json.loads(http("POST", "/v1/turn", observe | {"op": "resume", "request_id": "absent"})[1])["error"], "RESUME_TARGET_MISSING")
         self.assertEqual(http("GET", "/canonical/journal.sqlite3")[0], 404)
         self.assertEqual(http("POST", "/v1/turn", body | {"grants": []})[0], 400)
         self.assertEqual(http("POST", "/v1/turn", body, {"Content-Type": "application/json"})[0], 403)
         self.assertEqual(http("GET", "/", headers={"Host": "attacker.invalid"})[0], 403)
         self.assertEqual(http("POST", "/v1/turn", body, {"Content-Type": "application/json", "X-Owned-Home": "1", "Origin": "https://attacker.invalid"})[0], 403)
-        self.passed("TS1-10", loopback="127.0.0.1", http_reload_identity="STABLE", host_origin_and_route_guards="PASS")
+        self.passed("TS1-10", loopback="127.0.0.1", http_reload_identity="STABLE", host_origin_and_route_guards="PASS",
+                    browser_harness="EXACT_SERVED_JS_NODE_VM_REAL_LOOPBACK_HTTP", secret_input_variants=3,
+                    browser_raw_content_writes=0, rejected_input_store_creations=0,
+                    recovery_cases=["NOT_SENT_REENTRY", "USER_DURABLE_EXPLICIT_RESUME", "TERMINAL_REPLY_LOSS"],
+                    legacy_content_cleanup="PASS", resume_content_source="A019_PUBLIC_EXPORT")
 
     def test_ts1_11_blackbox_and_no_external_network(self):
         req = request()

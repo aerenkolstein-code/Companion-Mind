@@ -3,8 +3,9 @@
 python -m companion_mind.owned_home.testport --store DIR [--fault POINT]
 
 Request: {contract_version, scope:{universe_id,access_subject_id}, fixtures:[],
-grants:[], op:turn|observe|safe_export|wake|rebuild|info, ...}.
-turn adds turn:{Turn fields} and optional resume:true. observe adds request_id;
+grants:[], op:turn|observe|resume|safe_export|wake|rebuild|info, ...}.
+turn adds turn:{Turn fields} and optional resume:true. observe/resume add request_id;
+resume reconstructs the original turn from A019, without client-held content.
 wake adds candidate:{WakeCandidate fields}; rebuild adds source_id,version.
 Fixtures/grants are trusted, explicit synthetic test setup, not UI input.
 No production source/credential adapters or internal database operations exist.
@@ -16,7 +17,7 @@ import sys
 
 from companion_mind.journal import JournalError
 from .contracts import (VERSION, AuthorityFixture, Grant, HomeError, Scope, Turn,
-                        WakeCandidate, encode, exact_keys)
+                        WakeCandidate, encode, exact_keys, identifier)
 from .runtime import FAULTS, OwnedRuntime
 
 
@@ -30,8 +31,9 @@ def validate_operation(operation):
     elif op == "wake":
         exact_keys(operation, ("op", "candidate"))
         WakeCandidate(**operation["candidate"])
-    elif op == "observe":
+    elif op in {"observe", "resume"}:
         exact_keys(operation, ("op", "request_id"))
+        identifier(operation["request_id"])
     elif op == "rebuild":
         exact_keys(operation, ("op", "source_id", "version"))
     elif op in {"info", "safe_export"}:
@@ -64,6 +66,8 @@ class OwnedHomeTestPort:
         if op == "observe":
             exact_keys(operation, ("op", "request_id"))
             return self.__runtime.observe(operation["request_id"])
+        if op == "resume":
+            return self.__runtime.resume(operation["request_id"])
         if op == "safe_export":
             exact_keys(operation, ("op",))
             return {"events": self.__runtime.safe_export()}
@@ -79,7 +83,7 @@ class OwnedHomeTestPort:
                     "authority": "A019", "offline_only": True, "synthetic_only": True,
                     "live_provider_enabled": False, "external_connectors_enabled": False,
                     "automatic_resume": False, "FTS5": True, "index_relation": "SEPARATE_FROM_A019",
-                    "fault_points": sorted(FAULTS), "supported_ops": ["turn", "observe", "safe_export", "wake", "rebuild", "info"]}
+                    "fault_points": sorted(FAULTS), "supported_ops": ["turn", "observe", "resume", "safe_export", "wake", "rebuild", "info"]}
         raise HomeError("OPERATION_NOT_IN_SLICE")
 
 

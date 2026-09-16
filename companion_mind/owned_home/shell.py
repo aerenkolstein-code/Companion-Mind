@@ -15,6 +15,7 @@ from companion_mind.journal import JournalError
 from .contracts import (VERSION, AuthorityFixture, Grant, HomeError, Scope, Turn,
                         encode, exact_keys)
 from .runtime import OwnedRuntime
+from .testport import validate_operation
 
 SCOPE = Scope("synthetic-home", "synthetic-owner")
 FIXTURE = AuthorityFixture("local-demo", "v1", SCOPE.universe_id, SCOPE.access_subject_id,
@@ -25,8 +26,8 @@ HTML = """<!doctype html><html lang="en"><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Companion-Mind · Local slice</title>
 <body><main><h1>Companion-Mind</h1><p>Local synthetic workspace</p>
-<form id="form"><label for="message">Your message</label><br>
-<textarea id="message" rows="5" cols="64" maxlength="8000" required></textarea><br>
+<form id="form" autocomplete="off"><label for="message">Your message</label><br>
+<textarea id="message" rows="5" cols="64" maxlength="8000" autocomplete="off" required></textarea><br>
 <button id="submit">Send</button><button id="resume" type="button" hidden>Resume pending turn</button>
 <button id="next" type="button" hidden>New turn</button></form>
 <p id="status" role="status"></p><pre id="reply"></pre></main><script src="/app.js"></script></body></html>"""
@@ -34,14 +35,28 @@ HTML = """<!doctype html><html lang="en"><meta charset="utf-8">
 JS = """'use strict';
 const $ = id => document.getElementById(id);
 const key = 'owned-home-v1:' + location.origin;
-let pending = null;
-try { pending = JSON.parse(localStorage.getItem(key)); } catch (_) {}
+let pending = null, draft = null, state = null, busy = false;
+function saveHandle(id) {
+  // Only locally generated UUID identity crosses the persistence boundary.
+  // Never spread a turn/server response or serialize DOM/message content here.
+  const handle = {request_id:id};
+  localStorage.setItem(key, JSON.stringify(handle));
+  pending = handle;
+}
+function controls() {
+  $('submit').disabled = busy || (pending !== null && state !== 'NOT_FOUND');
+  $('message').disabled = $('submit').disabled;
+  $('resume').disabled = busy; $('next').disabled = busy;
+  $('resume').hidden = !['AWAIT_EXPLICIT_RESUME','UNKNOWN'].includes(state);
+  $('resume').textContent = state === 'UNKNOWN' ? 'Check pending turn' : 'Resume pending turn';
+  $('next').hidden = pending === null || ['AWAIT_EXPLICIT_RESUME','UNKNOWN'].includes(state);
+}
 function render(r) {
-  $('status').textContent = r.stop_reason || r.status;
+  state = r.status;
+  $('status').textContent = state === 'NOT_FOUND'
+    ? 'No durable turn found. Enter your message to retry.' : (r.stop_reason || state);
   $('reply').textContent = r.visible_reply || '';
-  const waiting = r.status === 'AWAIT_EXPLICIT_RESUME';
-  $('resume').hidden = !waiting;
-  $('next').hidden = waiting || r.status === 'NOT_FOUND';
+  controls();
 }
 async function call(body) {
   const response = await fetch('/v1/turn', {method:'POST',
@@ -52,27 +67,55 @@ async function call(body) {
 }
 function report(error) { $('status').textContent = error.message; }
 $('form').addEventListener('submit', async e => {
-  e.preventDefault(); $('submit').disabled = true;
+  e.preventDefault(); if (busy) return;
+  busy = true; controls();
   try {
-    if (!pending) {
-      const id = crypto.randomUUID();
-      pending = {contract_version:'owned-home/1',request_id:id,session_id:id,
+    // Resolve uncertainty before a retry. Observation never invokes cognition.
+    if (pending) {
+      const current = await call({contract_version:'owned-home/1',op:'observe',request_id:pending.request_id});
+      if (current.status !== 'NOT_FOUND') { draft = null; return; }
+    } else { saveHandle(crypto.randomUUID()); }
+    if (!draft) {
+      const id = pending.request_id;
+      draft = {contract_version:'owned-home/1',request_id:id,session_id:id,
         turn_id:id,turn_no:1,universe_id:'synthetic-home',access_subject_id:'synthetic-owner',
         source_id:'local-demo',source_version:'v1',text:$('message').value,
         observed_at:new Date().toISOString(),budget_bytes:16384};
-      localStorage.setItem(key,JSON.stringify(pending));
+      $('message').value = '';
     }
-    await call({contract_version:'owned-home/1',op:'turn',turn:pending});
-  } catch (error) { report(error); } finally { $('submit').disabled = false; }
+    await call({contract_version:'owned-home/1',op:'turn',turn:draft});
+    draft = null;
+  } catch (error) {
+    state = 'UNKNOWN'; report(error);
+  } finally { draft = null; busy = false; controls(); }
 });
-$('resume').addEventListener('click', () => call({contract_version:'owned-home/1',op:'turn',turn:pending,resume:true}).catch(report));
+$('resume').addEventListener('click', async () => {
+  if (busy || !pending || !['AWAIT_EXPLICIT_RESUME','UNKNOWN'].includes(state)) return;
+  const op = state === 'UNKNOWN' ? 'observe' : 'resume';
+  busy = true; controls();
+  try { await call({contract_version:'owned-home/1',op:op,request_id:pending.request_id}); }
+  catch (error) { state = 'UNKNOWN'; report(error); }
+  finally { busy = false; controls(); }
+});
 $('next').addEventListener('click', () => {
-  pending = null; localStorage.removeItem(key); $('message').value = '';
-  $('next').hidden = true; $('reply').textContent = ''; $('status').textContent = '';
+  if (busy) return;
+  localStorage.removeItem(key); pending = null; draft = null; state = null;
+  $('message').value = ''; $('reply').textContent = ''; $('status').textContent = ''; controls();
 });
-if (pending) {
-  $('message').value = pending.text;
-  call({contract_version:'owned-home/1',op:'observe',request_id:pending.request_id}).catch(report);
+addEventListener('pagehide', () => { draft = null; $('message').value = ''; });
+try {
+  let saved = null;
+  try { saved = JSON.parse(localStorage.getItem(key)); } catch (_) {}
+  if (saved && typeof saved.request_id === 'string' &&
+      /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(saved.request_id)) {
+    // Replace legacy full-turn storage with the allowlisted identity only.
+    saveHandle(saved.request_id);
+    busy = true; controls();
+    call({contract_version:'owned-home/1',op:'observe',request_id:pending.request_id})
+      .catch(error => { state = 'UNKNOWN'; report(error); }).finally(() => { busy = false; controls(); });
+  } else { localStorage.removeItem(key); controls(); }
+} catch (_) {
+  busy = true; controls(); $('status').textContent = 'Recovery storage unavailable.';
 }
 """
 
@@ -132,15 +175,18 @@ def make_server(directory, *, host="127.0.0.1", port=0):
                 op = body.get("op")
                 if op == "turn":
                     exact_keys(body, ("contract_version", "op", "turn"), ("resume",))
-                elif op == "observe":
+                elif op in {"observe", "resume"}:
                     exact_keys(body, ("contract_version", "op", "request_id"))
                 else:
                     raise HomeError("OPERATION_NOT_IN_SLICE")
                 if body["contract_version"] != VERSION:
                     raise HomeError("CONTRACT_VERSION_MISMATCH")
+                # Reject content/identity before even opening persistent stores.
+                validate_operation({k: v for k, v in body.items() if k != "contract_version"})
                 with OwnedRuntime(directory, scope=SCOPE, fixtures=[FIXTURE], grants=[GRANT]) as runtime:
                     result = (runtime.submit(Turn(**body["turn"]), resume=body.get("resume", False))
-                              if op == "turn" else runtime.observe(body["request_id"]))
+                              if op == "turn" else runtime.resume(body["request_id"])
+                              if op == "resume" else runtime.observe(body["request_id"]))
                 self._send(200, encode({"ok": True, "result": result}))
             except Exception as exc:
                 code = str(exc) if isinstance(exc, (HomeError, JournalError)) else "INVALID_REQUEST"

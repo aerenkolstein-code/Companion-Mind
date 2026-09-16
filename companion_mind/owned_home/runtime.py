@@ -148,6 +148,21 @@ class OwnedRuntime:
             return matches[0]
         return None
 
+    def resume(self, request_id):
+        """Explicit recovery by stable handle; content comes only from A019.
+
+        Never require the browser to retain/replay a raw turn. The existing
+        submit path verifies the reconstructed request fingerprint and preserves
+        terminal idempotency and the current permission gate.
+        """
+        users, _ = self._lookup(request_id)
+        if not users:
+            raise HomeError("RESUME_TARGET_MISSING")
+        user = users[0]
+        control = user["metadata"]["extensions"]["owned_home"]
+        turn = Turn(**control["request"], text=user["content_payload"]["text"])
+        return self.submit(turn, resume=True)
+
     def _context(self, turn, decision, source):
         ref = source.ref() if source else {"source_id": turn.source_id, "version": turn.source_version}
         evidence = [{"ref": ref, "text": source.text}] if source else []
