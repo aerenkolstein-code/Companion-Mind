@@ -1,0 +1,18 @@
+{
+  "manifest_version": "a019-offline-manifest/1",
+  "contract_version": "canonical_event/v1",
+  "contract_commit": "63ac8d7de8eb35915cc291b0f7ea67c33b366922",
+  "seam": "python -m companion_mind.journal",
+  "provider": "offline deterministic stub",
+  "replica": "OFFLINE_DRIVE_STUB",
+  "fresh_runs": 2,
+  "turns_per_run": 120,
+  "terminal_outcomes": {"complete": 100, "partial": 10, "failed": 10},
+  "canonical_events_per_run": 240,
+  "faults": ["F1", "F2", "F3", "F4", "F5", "F6", "F7", "F8"],
+  "additional_atomic_fault": "APPEND_BEFORE_COMMIT",
+  "repeated_reopens": 3,
+  "zero_tolerance": ["event_loss", "sequence_disorder", "duplicate_amplification", "destructive_correction", "synthetic_secret_leak", "unknown_collapse"],
+  "candidate_pin": "exact PR head plus clean-checkout A1 receipt; no self-referential commit field",
+  "acceptance_ceiling": "READY_FOR_E1_REVIEW; independent A2 and Board required"
+}
