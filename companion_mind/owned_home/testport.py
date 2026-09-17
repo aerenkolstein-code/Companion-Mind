@@ -19,13 +19,15 @@ from companion_mind.journal import JournalError
 from .contracts import (VERSION, AuthorityFixture, Grant, HomeError, Scope, Turn,
                         WakeCandidate, encode, exact_keys, identifier)
 from .runtime import FAULTS, OwnedRuntime
+from .context import ContextTurn
+from .router import SourceRevision
 
 
 def validate_operation(operation):
     op = operation.get("op") if isinstance(operation, dict) else None
-    if op == "turn":
+    if op in {"turn", "context_turn", "topic_switch"}:
         exact_keys(operation, ("op", "turn"), ("resume",))
-        Turn(**operation["turn"])
+        (Turn if op == "turn" else ContextTurn)(**operation["turn"])
         if type(operation.get("resume", False)) is not bool:
             raise HomeError("INVALID_RESUME")
     elif op == "wake":
@@ -34,6 +36,9 @@ def validate_operation(operation):
     elif op in {"observe", "resume"}:
         exact_keys(operation, ("op", "request_id"))
         identifier(operation["request_id"])
+    elif op == "session_state":
+        exact_keys(operation, ("op", "session_id"))
+        identifier(operation["session_id"])
     elif op == "rebuild":
         exact_keys(operation, ("op", "source_id", "version"))
     elif op in {"info", "safe_export"}:
@@ -63,6 +68,10 @@ class OwnedHomeTestPort:
         if op == "turn":
             exact_keys(operation, ("op", "turn"), ("resume",))
             return self.__runtime.submit(Turn(**operation["turn"]), resume=operation.get("resume", False))
+        if op in {"context_turn", "topic_switch"}:
+            return self.__runtime.submit(ContextTurn(**operation["turn"]), resume=operation.get("resume", False))
+        if op == "session_state":
+            return self.__runtime.session_state(operation["session_id"])
         if op == "observe":
             exact_keys(operation, ("op", "request_id"))
             return self.__runtime.observe(operation["request_id"])
@@ -83,7 +92,8 @@ class OwnedHomeTestPort:
                     "authority": "A019", "offline_only": True, "synthetic_only": True,
                     "live_provider_enabled": False, "external_connectors_enabled": False,
                     "automatic_resume": False, "FTS5": True, "index_relation": "SEPARATE_FROM_A019",
-                    "fault_points": sorted(FAULTS), "supported_ops": ["turn", "observe", "resume", "safe_export", "wake", "rebuild", "info"]}
+                    "context_version": "context-pack/2", "recent_turn_limit": 4, "evidence_limit": 5,
+                    "fault_points": sorted(FAULTS), "supported_ops": ["turn", "observe", "resume", "safe_export", "wake", "rebuild", "info", "context_turn", "topic_switch", "session_state"]}
         raise HomeError("OPERATION_NOT_IN_SLICE")
 
 
@@ -91,7 +101,7 @@ def execute(directory, request, *, fault=None):
     if not isinstance(request, dict):
         raise HomeError("INVALID_SHAPE")
     required = ("contract_version", "scope", "op")
-    optional = ("fixtures", "grants", "turn", "resume", "request_id", "candidate", "source_id", "version")
+    optional = ("fixtures", "grants", "turn", "resume", "request_id", "candidate", "source_id", "version", "session_id")
     exact_keys(request, required, optional)
     if request["contract_version"] != VERSION:
         raise HomeError("CONTRACT_VERSION_MISMATCH")
@@ -102,7 +112,7 @@ def execute(directory, request, *, fault=None):
     # Validate untrusted operation bodies before opening any persistent store.
     validate_operation(operation)
     with OwnedHomeTestPort(directory, scope=Scope(**request["scope"]),
-                           fixtures=[AuthorityFixture(**f) for f in fixtures],
+                           fixtures=[(SourceRevision if "revision" in f or "lifecycle" in f else AuthorityFixture)(**f) for f in fixtures],
                            grants=[Grant(**g) for g in grants], fault=fault) as port:
         return port.execute(operation)
 

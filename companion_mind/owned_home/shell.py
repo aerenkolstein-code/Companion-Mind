@@ -15,6 +15,7 @@ from companion_mind.journal import JournalError
 from .contracts import (VERSION, AuthorityFixture, Grant, HomeError, Scope, Turn,
                         encode, exact_keys)
 from .runtime import OwnedRuntime
+from .context import ContextTurn
 from .testport import validate_operation
 
 SCOPE = Scope("synthetic-home", "synthetic-owner")
@@ -25,7 +26,7 @@ GRANT = Grant(SCOPE.universe_id, SCOPE.access_subject_id, FIXTURE.source_id, FIX
 HTML = """<!doctype html><html lang="en"><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Companion-Mind · Local slice</title>
-<body><main><h1>Companion-Mind</h1><p>Local synthetic workspace</p>
+<body><main><h1>Companion-Mind</h1><p>Local synthetic workspace · <a href="/continuity">Multi-topic workspace</a></p>
 <form id="form" autocomplete="off"><label for="message">Your message</label><br>
 <textarea id="message" rows="5" cols="64" maxlength="8000" autocomplete="off" required></textarea><br>
 <button id="submit">Send</button><button id="resume" type="button" hidden>Resume pending turn</button>
@@ -120,6 +121,120 @@ try {
 """
 
 
+# The v1 page/script stays available for existing clients and recovery handles.
+# The linked continuity page has its own strictly allowlisted control record.
+CONTINUITY_HTML = """<!doctype html><html lang="en"><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Companion-Mind · Topics</title><body><main><h1>Companion-Mind</h1>
+<p>Local synthetic workspace</p><p id="session"></p><p id="active-topic"></p>
+<label for="topic">Topic</label><select id="topic"><option value="topic-a">Topic A</option>
+<option value="topic-b">Topic B</option><option value="topic-c">Topic C</option></select>
+<button id="switch" type="button">Switch topic</button>
+<form id="form" autocomplete="off"><label for="message">Your message</label><br>
+<textarea id="message" rows="5" cols="64" maxlength="8000" autocomplete="off" required></textarea><br>
+<button id="submit">Send</button><button id="resume" type="button" hidden>Resume pending turn</button>
+<button id="next" type="button" hidden>New turn</button></form>
+<p id="status" role="status"></p><pre id="reply"></pre>
+<a href="/">Single-turn workspace</a></main><script src="/continuity.js"></script></body></html>"""
+
+CONTINUITY_JS = """'use strict';
+const $ = id => document.getElementById(id);
+const key = 'owned-home-v2:' + location.origin;
+const uuid = value => typeof value === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
+const topics = ['topic-a','topic-b','topic-c'];
+let control, state = null, busy = false;
+function persist() {
+  // Exactly four non-secret control fields. Never serialize a server object,
+  // DOM value, message, fixture, context, trace, or source body.
+  localStorage.setItem(key, JSON.stringify({session_id:control.session_id,
+    topic_id:control.topic_id,request_id:control.request_id,turn_no:control.turn_no}));
+}
+function controls() {
+  const held = busy || (control.request_id !== null && state !== 'NOT_FOUND');
+  $('submit').disabled = held; $('message').disabled = held;
+  $('switch').disabled = busy || ['AWAIT_EXPLICIT_RESUME','UNKNOWN'].includes(state);
+  $('topic').disabled = $('switch').disabled;
+  $('resume').disabled = busy; $('next').disabled = busy;
+  $('resume').hidden = !['AWAIT_EXPLICIT_RESUME','UNKNOWN'].includes(state);
+  $('next').hidden = control.request_id === null || ['AWAIT_EXPLICIT_RESUME','UNKNOWN'].includes(state);
+  $('session').textContent = 'Session: ' + control.session_id;
+  $('active-topic').textContent = 'Active topic: ' + control.topic_id;
+}
+function render(r) {
+  state = r.status;
+  if (Number.isInteger(r.next_turn_no) && r.next_turn_no > control.turn_no) control.turn_no = r.next_turn_no;
+  if (topics.includes(r.topic_id)) { control.topic_id = r.topic_id; $('topic').value = r.topic_id; }
+  persist(); $('status').textContent = r.stop_reason || state;
+  $('reply').textContent = r.visible_reply || ''; controls();
+}
+async function call(body) {
+  const response = await fetch('/v1/turn', {method:'POST',headers:{'Content-Type':'application/json','X-Owned-Home':'1'},body:JSON.stringify(body)});
+  const data = await response.json();
+  if (!data.ok) throw new Error(data.error);
+  render(data.result); return data.result;
+}
+function clearTurn() {
+  control.request_id = null; state = null; $('message').value = ''; $('reply').textContent = '';
+  persist(); controls();
+}
+async function send(text, op) {
+  if (busy) return;
+  busy = true; controls();
+  try {
+    if (control.request_id) {
+      const r = await call({contract_version:'owned-home/1',op:'observe',request_id:control.request_id});
+      if (r.status !== 'NOT_FOUND') return;
+    } else { control.request_id = crypto.randomUUID(); persist(); }
+    const turn = {contract_version:'owned-home/1',request_id:control.request_id,
+      session_id:control.session_id,turn_id:control.request_id,turn_no:control.turn_no,
+      universe_id:'synthetic-home',access_subject_id:'synthetic-owner',
+      source_id:'local-demo',source_version:'v1',topic_id:control.topic_id,premise_id:'task-v1',
+      evidence_needs:[{source_id:'local-demo',route:'CURRENT'}],text:text,
+      observed_at:new Date().toISOString(),budget_bytes:16384};
+    await call({contract_version:'owned-home/1',op:op,turn:turn});
+  } catch (e) { state = 'UNKNOWN'; $('status').textContent = e.message; }
+  finally { $('message').value = ''; busy = false; controls(); }
+}
+$('form').addEventListener('submit', async e => {
+  e.preventDefault(); const text = $('message').value; $('message').value = '';
+  await send(text, 'context_turn');
+});
+$('switch').addEventListener('click', async () => {
+  if (busy || ['AWAIT_EXPLICIT_RESUME','UNKNOWN'].includes(state)) return;
+  const chosen = $('topic').value;
+  if (!topics.includes(chosen)) return;
+  clearTurn(); control.topic_id = chosen; persist(); controls();
+  await send('Switch topic.', 'topic_switch');
+});
+$('next').addEventListener('click', () => {
+  if (!busy && !['AWAIT_EXPLICIT_RESUME','UNKNOWN'].includes(state)) clearTurn();
+});
+$('resume').addEventListener('click', async () => {
+  if (busy || !control.request_id || !['AWAIT_EXPLICIT_RESUME','UNKNOWN'].includes(state)) return;
+  busy = true; controls();
+  try { await call({contract_version:'owned-home/1',op:state === 'UNKNOWN' ? 'observe' : 'resume',request_id:control.request_id}); }
+  catch (e) { state = 'UNKNOWN'; $('status').textContent = e.message; }
+  finally { busy = false; controls(); }
+});
+addEventListener('pagehide', () => { $('message').value = ''; });
+try {
+  let saved = null;
+  try { saved = JSON.parse(localStorage.getItem(key)); } catch (_) {}
+  const valid = saved && uuid(saved.session_id) && topics.includes(saved.topic_id) &&
+    (saved.request_id === null || uuid(saved.request_id)) && Number.isInteger(saved.turn_no) && saved.turn_no >= 1 && saved.turn_no <= 1000000;
+  control = valid ? {session_id:saved.session_id,topic_id:saved.topic_id,request_id:saved.request_id,turn_no:saved.turn_no} :
+    {session_id:crypto.randomUUID(),topic_id:'topic-a',request_id:null,turn_no:1};
+  persist(); $('topic').value = control.topic_id; controls();
+  if (control.request_id) {
+    busy = true; controls();
+    call({contract_version:'owned-home/1',op:'observe',request_id:control.request_id})
+      .catch(e => { state = 'UNKNOWN'; $('status').textContent = e.message; })
+      .finally(() => { busy = false; controls(); });
+  }
+} catch (_) { busy = true; $('submit').disabled = true; $('switch').disabled = true; $('status').textContent = 'Recovery storage unavailable.'; }
+"""
+
+
 def make_server(directory, *, host="127.0.0.1", port=0):
     if host != "127.0.0.1":
         raise HomeError("LOOPBACK_ONLY")
@@ -156,6 +271,10 @@ def make_server(directory, *, host="127.0.0.1", port=0):
                 return self._send(200, HTML, "text/html")
             if self.path == "/app.js":
                 return self._send(200, JS, "application/javascript")
+            if self.path == "/continuity":
+                return self._send(200, CONTINUITY_HTML, "text/html")
+            if self.path == "/continuity.js":
+                return self._send(200, CONTINUITY_JS, "application/javascript")
             self._send(404, encode({"ok": False, "error": "ROUTE_NOT_FOUND"}))
 
         def do_POST(self):
@@ -173,7 +292,7 @@ def make_server(directory, *, host="127.0.0.1", port=0):
                 self.connection.settimeout(3)
                 body = json.loads(self.rfile.read(length))
                 op = body.get("op")
-                if op == "turn":
+                if op in {"turn", "context_turn", "topic_switch"}:
                     exact_keys(body, ("contract_version", "op", "turn"), ("resume",))
                 elif op in {"observe", "resume"}:
                     exact_keys(body, ("contract_version", "op", "request_id"))
@@ -184,8 +303,8 @@ def make_server(directory, *, host="127.0.0.1", port=0):
                 # Reject content/identity before even opening persistent stores.
                 validate_operation({k: v for k, v in body.items() if k != "contract_version"})
                 with OwnedRuntime(directory, scope=SCOPE, fixtures=[FIXTURE], grants=[GRANT]) as runtime:
-                    result = (runtime.submit(Turn(**body["turn"]), resume=body.get("resume", False))
-                              if op == "turn" else runtime.resume(body["request_id"])
+                    result = (runtime.submit((Turn if op == "turn" else ContextTurn)(**body["turn"]), resume=body.get("resume", False))
+                              if op in {"turn", "context_turn", "topic_switch"} else runtime.resume(body["request_id"])
                               if op == "resume" else runtime.observe(body["request_id"]))
                 self._send(200, encode({"ok": True, "result": result}))
             except Exception as exc:
