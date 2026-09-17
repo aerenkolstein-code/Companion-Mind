@@ -516,23 +516,29 @@ class Slice1Conformance(unittest.TestCase):
         self.assertGreaterEqual(sys.version_info, (3, 11))
         with sqlite3.connect(":memory:") as probe:
             probe.execute("CREATE VIRTUAL TABLE probe USING fts5(body)")
-        allowed = {"companion_mind/owned_home/" + name + ".py" for name in ("contracts", "runtime", "shell", "testport", "index")}
+        # WO-A1-A029-P2S2-01 + USER-approved single-file preflight amendment.
+        # Fresh base f5deb051/tree2efaa0; contracts/index now remain protected.
+        allowed = {"companion_mind/owned_home/" + name + ".py" for name in
+                   ("runtime", "shell", "testport", "context", "router", "trace")}
+        allowed.add("tests/test_owned_home_slice1_conformance.py")
+        def permitted(path):
+            return path in allowed or (path.startswith("tests/test_owned_home_slice2_") and path.endswith(".py"))
         changed = set(git("diff", "--name-only", "HEAD").splitlines()) | set(git("ls-files", "--others", "--exclude-standard").splitlines())
-        self.assertTrue(all(p in allowed or (p.startswith("tests/test_owned_home_slice1_") and p.endswith(".py")) for p in changed), changed)
+        self.assertTrue(all(permitted(p) for p in changed), changed)
         # Shallow CI need not contain the parent commit object. Reconstruct the
-        # unchanged base tree by removing only the WO's new allowed surface from
+        # unchanged protected tree by removing only the approved mutable surface from
         # HEAD using a temporary index. Exact Git tree equality proves *all*
         # remaining files unchanged, without fetching or weakening the gate.
         with tempfile.TemporaryDirectory() as index_directory:
             env = dict(os.environ, GIT_INDEX_FILE=str(Path(index_directory) / "index"))
             subprocess.run(["git", "read-tree", "HEAD"], cwd=ROOT, env=env, check=True)
-            added_surface = [p for p in git("ls-files").splitlines() if p in allowed or
-                             (p.startswith("tests/test_owned_home_slice1_") and p.endswith(".py"))]
+            added_surface = [p for p in git("ls-files").splitlines() if permitted(p)]
             subprocess.run(["git", "update-index", "--force-remove", "--", *added_surface],
                            cwd=ROOT, env=env, check=True)
             reconstructed = subprocess.check_output(["git", "write-tree"], cwd=ROOT, env=env, text=True).strip()
-            self.assertEqual(reconstructed, BASE_TREE)
-        for name in allowed:
+            self.assertEqual(reconstructed, "8293e4e65ceb4e10a1bf056f502573655721efff")
+        for name in sorted(allowed - {"tests/test_owned_home_slice1_conformance.py"} |
+                           {"companion_mind/owned_home/contracts.py", "companion_mind/owned_home/index.py"}):
             source = (ROOT / name).read_text()
             tree = ast.parse(source)
             if not name.endswith(("shell.py", "index.py")):
