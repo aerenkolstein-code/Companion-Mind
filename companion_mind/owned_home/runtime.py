@@ -16,17 +16,20 @@ from .contracts import (VERSION, HomeError, Turn, encode, evaluate_wake, fingerp
 from .index import LexicalIndex
 from .context import ContextTurn, build_context, invalidation
 from .router import route_authorities
-from .trace import context_trace
+from .trace import context_trace, model_trace
+from .model_gateway import (CapabilityRegistry, ModelTurn, ProfileRef, call_spec,
+                            result_from_terminal, script_frames, spec_matches)
 
 FAULTS = {"AFTER_USER_DURABLE", "AFTER_PROVIDER_INTENT", "AFTER_STUB_FRAME", "BEFORE_DISPLAY"}
 JOURNAL_FAULTS = {"AFTER_PROVIDER_INTENT": "F2", "AFTER_STUB_FRAME": "F3", "BEFORE_DISPLAY": "F5"}
 
 
 class OwnedRuntime:
-    def __init__(self, directory, *, scope, fixtures=(), grants=(), fault=None):
+    def __init__(self, directory, *, scope, fixtures=(), grants=(), fault=None, model_profiles=None):
         if fault is not None and fault not in FAULTS:
             raise HomeError("UNKNOWN_FAULT")
         self.scope, self.fixtures, self.grants = scope, tuple(fixtures), tuple(grants)
+        self.models = CapabilityRegistry(model_profiles)
         keys = [(f.universe_id, f.access_subject_id, f.source_id, f.version,
                  getattr(f, "revision", "r1")) for f in self.fixtures]
         if len(set(keys)) != len(keys):
@@ -136,7 +139,10 @@ class OwnedRuntime:
                           visible_reply=terminal["content_payload"].get("text", ""))
             req = control["request"]
             if "topic_id" in req:
-                return self._observe_context(result, control, saved)
+                result = self._observe_context(result, control, saved)
+                if "model_intent" in req:
+                    result = self._observe_model(result, saved, terminal)
+                return result
             current = permission(self.scope, req["source_id"], req["source_version"], self.grants)
             if saved.get("permission", {}).get("decision") == "ALLOW" and current["decision"] != "ALLOW":
                 result.update(visible_reply=None, stop_reason="PERMISSION_REVOKED_REPLAY",
@@ -168,7 +174,7 @@ class OwnedRuntime:
             raise HomeError("RESUME_TARGET_MISSING")
         user = users[0]
         control = user["metadata"]["extensions"]["owned_home"]
-        turn_type = ContextTurn if "topic_id" in control["request"] else Turn
+        turn_type = self._turn_type(control["request"])
         turn = turn_type(**control["request"], text=user["content_payload"]["text"])
         return self.submit(turn, resume=True)
 
@@ -204,9 +210,13 @@ class OwnedRuntime:
         result["context_fingerprint"] = fingerprint(result)
         return result, reason, actual_payload
 
-    def submit(self, turn, *, resume=False):
+    @staticmethod
+    def _turn_type(request):
+        return ModelTurn if "model_intent" in request else ContextTurn if "topic_id" in request else Turn
+
+    def submit(self, turn, *, resume=False, expected_spec=None):
         if isinstance(turn, ContextTurn):
-            return self._submit_context(turn, resume=resume)
+            return self._submit_context(turn, resume=resume, expected_spec=expected_spec)
         if turn.scope != self.scope:
             raise HomeError("SCOPE_DENIED")
         if type(resume) is not bool:
@@ -281,7 +291,7 @@ class OwnedRuntime:
 
     def _observe_context(self, result, control, saved):
         request = control["request"]
-        turn = ContextTurn(**request, text="")
+        turn = self._turn_type(request)(**request, text="")
         _, _, snapshot = self._route_context(turn)
         latest = self._topic_terminals(turn.session_id, turn.topic_id)
         premise = self._control(latest[-1])["request"]["premise_id"] if latest else turn.premise_id
@@ -336,7 +346,7 @@ class OwnedRuntime:
                 "topics": projections, "authority": False, "derived_from": "A019_PUBLIC_EXPORT",
                 "counters": dict(self.counters)}
 
-    def _submit_context(self, turn, *, resume=False):
+    def _submit_context(self, turn, *, resume=False, preview=False, expected_spec=None):
         if turn.scope != self.scope:
             raise HomeError("SCOPE_DENIED")
         if type(resume) is not bool:
@@ -353,6 +363,8 @@ class OwnedRuntime:
         if users:
             if self._control(users[0])["request_fingerprint"] != fingerprint(turn.projection()):
                 raise HomeError("REQUEST_IDENTITY_CONFLICT")
+            if preview:
+                raise HomeError("EXISTING_REQUEST_SPEC_LOCKED")
             if terminals or not resume:
                 return self.observe(turn.request_id)
         elif resume:
@@ -367,9 +379,11 @@ class OwnedRuntime:
             if any(self._control(e)["identity"]["request_id"] not in completed for e in prior_users):
                 raise HomeError("PENDING_TURN_REQUIRES_RESUME")
         user = self._event(turn, "user")
-        user_receipt = self.journal.ingest("A019", user)
-        if self.fault == "AFTER_USER_DURABLE":
+        user_receipt = None if preview else self.journal.ingest("A019", user)
+        if not preview and self.fault == "AFTER_USER_DURABLE":
             os._exit(86)
+        model_turn = isinstance(turn, ModelTurn)
+        selected, selection = self.models.select(turn.intent, turn.budget_bytes) if model_turn else (None, None)
         router, evidence, snapshot = self._route_context(turn)
         recent = []
         by_request = {self._control(e)["identity"]["request_id"]: e for e in prior_users}
@@ -391,10 +405,13 @@ class OwnedRuntime:
         last_active = self._control(prior_users[-1])["request"].get("topic_id") if prior_users else None
         context, working, boot, payload = build_context(
             turn, router, evidence, snapshot, previous=previous, recent=recent, segments=segments,
-            reactivated=bool(previous and last_active != turn.topic_id))
+            reactivated=bool(previous and last_active != turn.topic_id), model_budget=selection)
         reason = context["stop_reason"]
         projection = {"context": context, "working_set": working, "boot_pack": boot,
                       "retrieval": router, "trace": context_trace(turn, router, context), "stop_reason": reason}
+        if model_turn:
+            return self._model_call(turn, user, user_receipt, projection, selected, selection,
+                                    preview=preview, expected_spec=expected_spec)
         template = self._event(turn, "assistant", projection)
         reply = "Stopped: " + reason if reason else "Synthetic evidence: " + " | ".join(e["text"] for e in payload["evidence"])
         script = StubScript((reply,), "failed" if reason else "complete")
@@ -405,6 +422,79 @@ class OwnedRuntime:
         result["receipts"]["assistant"] = receipt["assistant"]
         result["execution_order"] = ["USER_DURABLE_RECEIPT", *router["query_order"],
                                      "CONTEXT_" + context["status"], *receipt["trace"], "DISPLAY"]
+        return result
+
+    def model_registry(self, ref=None):
+        if ref is None:
+            return self.models.projection()
+        profile = self.models.lookup(ProfileRef(**ref))
+        return {"status": "RESOLVED" if profile else "EXACT_PROFILE_UNRESOLVED",
+                "profile": profile.projection() if profile else None, "provider_invocations": 0}
+
+    def model_preview(self, turn, supplied_spec=None):
+        preview = self._submit_context(turn, preview=True)
+        if supplied_spec is not None:
+            valid = bool(preview["call_spec"] and spec_matches(supplied_spec, preview["call_spec"]))
+            return {"valid": valid, "reason": "EXACT_SPEC_MATCH" if valid else "MODEL_SPEC_INVALID",
+                    "provider_invocations": 0, "expected_spec_fingerprint":
+                    preview["call_spec"]["spec_fingerprint"] if preview["call_spec"] else None}
+        return preview
+
+    def _model_call(self, turn, user, user_receipt, projection, selected, selection, *, preview, expected_spec):
+        context = projection["context"]
+        spec = call_spec(turn, selected, context) if selected and not projection["stop_reason"] else None
+        if expected_spec is not None and not (spec and spec_matches(expected_spec, spec)):
+            projection["stop_reason"] = "MODEL_SPEC_INVALID"
+        reason = projection["stop_reason"]
+        gateway = {"selection": selection, "call_spec": spec,
+                   "context_fingerprint": context["context_fingerprint"],
+                   "input_units": context["budget"]["included_bytes"],
+                   "latency_ms": selected.latency_ms if selected else None, "stop_reason": reason}
+        projection["model_gateway"] = gateway
+        if preview:
+            return {"preview_only": True, "identity": turn.identity, "selection": selection,
+                    "context": context, "working_set": projection["working_set"],
+                    "call_spec": spec, "stop_reason": reason, "provider_invocations": 0,
+                    "model_trace": model_trace(gateway, None)}
+        template = self._event(turn, "assistant", projection)
+        if selected:
+            template.update(provider=selected.provider_key, model=selected.model_key)
+        if reason:
+            # A pre-call STOP has no provider attempt. It still closes the
+            # canonical turn and obeys terminal-before-display using public ingest.
+            template["status"] = "failed"
+            template["content_payload"] = {"text": "Stopped: " + reason}
+            assistant = self.journal.ingest("A019", template)
+            count, trace = 0, ["ASSISTANT_DURABLE"]
+        else:
+            frames, outcome = script_frames(spec)
+            receipt = self.journal.append_user_then_invoke_stub(
+                user, template, attempt_id=turn.identity["attempt_id"], script=StubScript(frames, outcome))
+            assistant, count, trace = receipt["assistant"], receipt["provider_invocations"], receipt["trace"]
+        self.counters["cognition_stub_invocations"] += count
+        result = self.observe(turn.request_id)
+        result["provider_invocations"] = count
+        result["real_provider_invocations"] = 0
+        result["receipts"].update(user=user_receipt, assistant=assistant)
+        result["execution_order"] = ["USER_DURABLE_RECEIPT", "MODEL_PRE_CALL_SELECTION",
+                                     *projection["retrieval"]["query_order"], "CONTEXT_" + context["status"],
+                                     "MODEL_STOP" if reason else "MODEL_SPEC_VALIDATED", *trace, "DISPLAY"]
+        return result
+
+    def _observe_model(self, result, saved, terminal):
+        gateway = saved["model_gateway"]
+        spec = gateway["call_spec"]
+        call_result = result_from_terminal(spec, terminal, gateway["input_units"], gateway["latency_ms"]) if spec else None
+        trace = model_trace(gateway, call_result)
+        result.update(model_result=call_result, model_trace=trace, real_provider_invocations=0)
+        if call_result and call_result["outcome"] in ("UNKNOWN", "TIMEOUT"):
+            result["stop_reason"] = "MODEL_" + call_result["outcome"] + "_REQUIRES_EXPLICIT_DECISION"
+        # A019's complete/partial/failed status is evidence about stored text;
+        # the distinct five-way ModelCallResult is never inferred from that status.
+        if "trace" in result.get("projection", {}):
+            result["projection"]["trace"]["model_gateway"] = trace
+            result["projection"]["trace"].pop("trace_fingerprint", None)
+            result["projection"]["trace"]["trace_fingerprint"] = fingerprint(result["projection"]["trace"])
         return result
 
     def wake(self, candidate):

@@ -21,11 +21,27 @@ from .contracts import (VERSION, AuthorityFixture, Grant, HomeError, Scope, Turn
 from .runtime import FAULTS, OwnedRuntime
 from .context import ContextTurn
 from .router import SourceRevision
+from .model_gateway import ModelProfile, ModelTurn, ProfileRef
 
 
 def validate_operation(operation):
     op = operation.get("op") if isinstance(operation, dict) else None
-    if op in {"turn", "context_turn", "topic_switch"}:
+    if op in {"model_turn", "model_preview", "model_validate_spec"}:
+        required = ("op", "turn", "spec") if op == "model_validate_spec" else ("op", "turn")
+        exact_keys(operation, required, ("resume", "expected_spec") if op == "model_turn" else ())
+        ModelTurn(**operation["turn"])
+        if type(operation.get("resume", False)) is not bool:
+            raise HomeError("INVALID_RESUME")
+        if op == "model_validate_spec" and not isinstance(operation["spec"], dict):
+            raise HomeError("INVALID_MODEL_SPEC")
+        if "expected_spec" in operation and not isinstance(operation["expected_spec"], dict):
+            raise HomeError("INVALID_MODEL_SPEC")
+    elif op == "model_registry":
+        exact_keys(operation, ("op",))
+    elif op == "model_lookup":
+        exact_keys(operation, ("op", "profile_key", "profile_version"))
+        ProfileRef(operation["profile_key"], operation["profile_version"])
+    elif op in {"turn", "context_turn", "topic_switch"}:
         exact_keys(operation, ("op", "turn"), ("resume",))
         (Turn if op == "turn" else ContextTurn)(**operation["turn"])
         if type(operation.get("resume", False)) is not bool:
@@ -50,8 +66,9 @@ def validate_operation(operation):
 class OwnedHomeTestPort:
     version = VERSION
 
-    def __init__(self, directory, *, scope, fixtures=(), grants=(), fault=None):
-        self.__runtime = OwnedRuntime(directory, scope=scope, fixtures=fixtures, grants=grants, fault=fault)
+    def __init__(self, directory, *, scope, fixtures=(), grants=(), fault=None, model_profiles=None):
+        self.__runtime = OwnedRuntime(directory, scope=scope, fixtures=fixtures, grants=grants,
+                                      fault=fault, model_profiles=model_profiles)
 
     def close(self):
         self.__runtime.close()
@@ -65,6 +82,15 @@ class OwnedHomeTestPort:
     def execute(self, operation):
         validate_operation(operation)
         op = operation.get("op")
+        if op == "model_turn":
+            return self.__runtime.submit(ModelTurn(**operation["turn"]), resume=operation.get("resume", False),
+                                         expected_spec=operation.get("expected_spec"))
+        if op in {"model_preview", "model_validate_spec"}:
+            return self.__runtime.model_preview(ModelTurn(**operation["turn"]), operation.get("spec"))
+        if op == "model_registry":
+            return self.__runtime.model_registry()
+        if op == "model_lookup":
+            return self.__runtime.model_registry({k: operation[k] for k in ("profile_key", "profile_version")})
         if op == "turn":
             exact_keys(operation, ("op", "turn"), ("resume",))
             return self.__runtime.submit(Turn(**operation["turn"]), resume=operation.get("resume", False))
@@ -93,7 +119,8 @@ class OwnedHomeTestPort:
                     "live_provider_enabled": False, "external_connectors_enabled": False,
                     "automatic_resume": False, "FTS5": True, "index_relation": "SEPARATE_FROM_A019",
                     "context_version": "context-pack/2", "recent_turn_limit": 4, "evidence_limit": 5,
-                    "fault_points": sorted(FAULTS), "supported_ops": ["turn", "observe", "resume", "safe_export", "wake", "rebuild", "info", "context_turn", "topic_switch", "session_state"]}
+                    "model_gateway_version": "synthetic-model-gateway/1", "model_invocation_owner": "A019",
+                    "fault_points": sorted(FAULTS), "supported_ops": ["turn", "observe", "resume", "safe_export", "wake", "rebuild", "info", "context_turn", "topic_switch", "session_state", "model_registry", "model_lookup", "model_preview", "model_validate_spec", "model_turn"]}
         raise HomeError("OPERATION_NOT_IN_SLICE")
 
 
@@ -101,19 +128,24 @@ def execute(directory, request, *, fault=None):
     if not isinstance(request, dict):
         raise HomeError("INVALID_SHAPE")
     required = ("contract_version", "scope", "op")
-    optional = ("fixtures", "grants", "turn", "resume", "request_id", "candidate", "source_id", "version", "session_id")
+    optional = ("fixtures", "grants", "turn", "resume", "request_id", "candidate", "source_id", "version", "session_id",
+                "model_profiles", "profile_key", "profile_version", "spec", "expected_spec")
     exact_keys(request, required, optional)
     if request["contract_version"] != VERSION:
         raise HomeError("CONTRACT_VERSION_MISMATCH")
     fixtures, grants = request.get("fixtures", []), request.get("grants", [])
     if not isinstance(fixtures, list) or not isinstance(grants, list) or len(fixtures) > 16 or len(grants) > 32:
         raise HomeError("FIXTURE_LIMIT")
-    operation = {k: v for k, v in request.items() if k not in {"contract_version", "scope", "fixtures", "grants"}}
+    model_profiles = request.get("model_profiles")
+    if model_profiles is not None and (not isinstance(model_profiles, list) or len(model_profiles) > 16):
+        raise HomeError("INVALID_PROFILE_REGISTRY")
+    operation = {k: v for k, v in request.items() if k not in {"contract_version", "scope", "fixtures", "grants", "model_profiles"}}
     # Validate untrusted operation bodies before opening any persistent store.
     validate_operation(operation)
     with OwnedHomeTestPort(directory, scope=Scope(**request["scope"]),
                            fixtures=[(SourceRevision if "revision" in f or "lifecycle" in f else AuthorityFixture)(**f) for f in fixtures],
-                           grants=[Grant(**g) for g in grants], fault=fault) as port:
+                           grants=[Grant(**g) for g in grants], fault=fault,
+                           model_profiles=None if model_profiles is None else [ModelProfile(**p) for p in model_profiles]) as port:
         return port.execute(operation)
 
 
