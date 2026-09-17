@@ -1,0 +1,86 @@
+name: DEV-WF-00 VPS Readonly Probe
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: "Type RUN_READONLY to run the diagnostic probe"
+        required: true
+        default: "NO"
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: dev-wf00-vps-readonly
+  cancel-in-progress: false
+
+jobs:
+  probe:
+    if: ${{ inputs.confirm == 'RUN_READONLY' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      VPS_HOST: ${{ secrets.VPS_HOST }}
+      VPS_USER: ${{ secrets.VPS_USER }}
+      VPS_PORT: ${{ secrets.VPS_PORT }}
+      VPS_SSH_PRIVATE_KEY: ${{ secrets.VPS_SSH_PRIVATE_KEY }}
+      VPS_KNOWN_HOSTS: ${{ secrets.VPS_KNOWN_HOSTS }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Validate required SSH secrets
+        shell: bash
+        run: |
+          set -euo pipefail
+          for name in VPS_HOST VPS_USER VPS_SSH_PRIVATE_KEY VPS_KNOWN_HOSTS; do
+            if [[ -z "${!name:-}" ]]; then
+              echo "::error::Missing required GitHub Actions secret: ${name}"
+              exit 1
+            fi
+          done
+          echo "SSH secret presence check: PASS"
+
+      - name: Configure SSH client
+        shell: bash
+        run: |
+          set -euo pipefail
+          install -m 700 -d "$HOME/.ssh"
+          printf '%s\n' "$VPS_SSH_PRIVATE_KEY" > "$HOME/.ssh/id_ed25519"
+          chmod 600 "$HOME/.ssh/id_ed25519"
+          printf '%s\n' "$VPS_KNOWN_HOSTS" > "$HOME/.ssh/known_hosts"
+          chmod 600 "$HOME/.ssh/known_hosts"
+
+      - name: Run public health check and remote read-only probe
+        shell: bash
+        run: |
+          set -euo pipefail
+          port="${VPS_PORT:-22}"
+          receipt="$RUNNER_TEMP/ops-readonly.txt"
+          {
+            echo "== Public healthz =="
+            curl --fail --silent --show-error --max-time 10 https://isr.wte.netsolvps.com/healthz
+            echo
+            echo "== Remote read-only probe =="
+            ssh \
+              -i "$HOME/.ssh/id_ed25519" \
+              -p "$port" \
+              -o BatchMode=yes \
+              -o StrictHostKeyChecking=yes \
+              -o UserKnownHostsFile="$HOME/.ssh/known_hosts" \
+              -o ConnectTimeout=10 \
+              "$VPS_USER@$VPS_HOST" \
+              'bash -s' < tools/ops_readonly_probe.sh
+          } | tee "$receipt"
+
+      - name: Upload read-only receipt
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dev-wf00-vps-readonly-${{ github.run_id }}
+          path: ${{ runner.temp }}/ops-readonly.txt
+          if-no-files-found: warn
+          retention-days: 7
