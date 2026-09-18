@@ -75,6 +75,19 @@ def observe(req):
     return operation(req, "human_observe", human_request_id=req["human_request"]["human_request_id"])
 
 
+def stable_sample(result):
+    """Normalize only public Journal receipt instance/generation bookkeeping.
+
+    Canonical event IDs, payload fingerprints, offsets, durability and all
+    human/continuation semantic fields remain in the reproducible matrix.
+    """
+    sample = deepcopy(result)
+    for evidence in sample["evidence"]:
+        evidence["receipt"].pop("store_generation", None)
+        evidence["receipt"].pop("commit_generation", None)
+    return sample
+
+
 def process(store, req, fault=None):
     command = [sys.executable, "-m", "companion_mind.owned_home.testport", "--store", str(store)]
     if fault:
@@ -190,6 +203,11 @@ class Slice5Conformance(unittest.TestCase):
         self.assertEqual(self.child(observe(q))["continuation_count"], 0)
         c = self.child(resume(q, a))
         self.assertEqual((c["status"], c["continuation_count"], c["continuations_this_call"], c["terminal_count"]), ("STOP", 1, 1, 1))
+        fresh_store = self.root / "determinism"
+        fresh = self.child(q, fresh_store)
+        self.child(answer(q, fresh), fresh_store)
+        same = self.child(resume(q, fresh), fresh_store)
+        self.assertEqual(stable_sample(c), stable_sample(same))
         for op in (observe(q), resume(q, a), answer(q, a), resume(q, a, "human_cancel")):
             r = self.child(op)
             self.assertEqual((r["continuation_count"], r["continuations_this_call"], r["terminal_count"]), (1, 0, 1))
@@ -201,7 +219,8 @@ class Slice5Conformance(unittest.TestCase):
         self.passed("TS5-06", response_durable_before_resume=True, policy_version=c["executed_decision"]["policy_version"],
                     policy_fingerprint=c["executed_decision"]["policy_fingerprint"],
                     decision_fingerprint=c["executed_decision"]["decision_fingerprint"], continuation_count=1,
-                    repeat_increment=0, terminal_count=1, public_sample=c)
+                    repeat_increment=0, terminal_count=1, public_sample=stable_sample(c),
+                    sample_normalization=["receipt.store_generation", "receipt.commit_generation"], fresh_store_repeatability=True)
 
     def test_ts5_07_crash_recovery(self):
         q = request(); faults = self.call(operation(q, "info"))["human_fault_points"]
