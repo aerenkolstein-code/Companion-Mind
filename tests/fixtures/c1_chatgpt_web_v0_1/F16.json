@@ -1,0 +1,19 @@
+{
+  "fixture_id": "F16",
+  "purpose": "Profile/selector/partial selector drift",
+  "origin": "hand-authored synthetic / public-safe / no real conversation",
+  "snapshots": [
+    {
+      "html": "<main data-c1-conversation=\"synthetic-chatgpt\" data-c1-profile=\"9.9\" data-c1-vendor=\"chatgpt\" data-c1-mode=\"desktop-light-en\" data-c1-scope=\"local-synthetic-user\" data-c1-id=\"conv-01\" ><article data-c1-message=\"m-01\" data-c1-role=\"user\" data-c1-order=\"1\" data-c1-state=\"complete\" ><span data-c1-role-label=\"user\">You</span><div data-c1-content>Hello world</div></article></main>",
+      "error": "PROFILE_DRIFT"
+    },
+    {
+      "html": "<main data-changed-conversation=\"synthetic-chatgpt\" data-c1-profile=\"0.1\" data-c1-vendor=\"chatgpt\" data-c1-mode=\"desktop-light-en\" data-c1-scope=\"local-synthetic-user\" data-c1-id=\"conv-01\" ><article data-c1-message=\"m-01\" data-c1-role=\"user\" data-c1-order=\"1\" data-c1-state=\"complete\" ><span data-c1-role-label=\"user\">You</span><div data-c1-content>Hello world</div></article></main>",
+      "error": "PROFILE_DRIFT"
+    },
+    {
+      "html": "<main data-c1-conversation=\"synthetic-chatgpt\" data-c1-profile=\"0.1\" data-c1-vendor=\"chatgpt\" data-c1-mode=\"desktop-light-en\" data-c1-scope=\"local-synthetic-user\" data-c1-id=\"conv-01\" ><article data-c1-message=\"m-01\" data-c1-role=\"user\" data-c1-order=\"1\" data-c1-state=\"complete\" ><span data-c1-role-label=\"user\">You</span><div data-c1-content>Hello world</div></article><article data-new-message=\"m-02\" data-c1-role=\"user\" data-c1-order=\"2\" data-c1-state=\"complete\" ><span data-c1-role-label=\"user\">You</span><div data-c1-content>Lost</div></article></main>",
+      "error": "PROFILE_DRIFT"
+    }
+  ]
+}
