@@ -56,15 +56,17 @@ def invalidation(previous, snapshot, premise_id):
 
 
 def build_context(turn, router, evidence, snapshot, *, previous=None, recent=(),
-                  segments=(), reactivated=False):
+                  segments=(), reactivated=False, model_budget=None):
     reasons = invalidation(previous, snapshot, turn.premise_id)
+    budget_limit = turn.budget_bytes if model_budget is None else model_budget["effective_input_budget"]
     working_id = "ws-" + fingerprint({**turn.scope.projection(), "session_id": turn.session_id,
                                       "topic_id": turn.topic_id})[:32]
     ledger, included, omitted, recent_refs = [], [], [], []
     payload = {"topic_id": turn.topic_id, "user_text": turn.text, "evidence": [], "recent_exact_turns": []}
     size = lambda value: len(encode(value).encode("utf-8"))
     base_size = size(payload)
-    stop = "CONTEXT_BUDGET_EXCEEDED" if base_size > turn.budget_bytes else None
+    stop = (model_budget.get("stop_reason") if model_budget else None) or (
+        "CONTEXT_BUDGET_EXCEEDED" if base_size > budget_limit else None)
     required_payload = {**payload, "evidence": evidence, "recent_exact_turns": list(recent)}
     required = size(required_payload)
     compacted = []
@@ -81,7 +83,7 @@ def build_context(turn, router, evidence, snapshot, *, previous=None, recent=(),
         recent = recent[-RECENT_TURNS:]
     for item in evidence:
         proposed = {**payload, "evidence": payload["evidence"] + [item]}
-        reason = ("CONTEXT_BUDGET_EXCEEDED" if stop or size(proposed) > turn.budget_bytes else
+        reason = ("CONTEXT_BUDGET_EXCEEDED" if stop or size(proposed) > budget_limit else
                   "EVIDENCE_LIMIT" if len(included) >= MAX_EVIDENCE else None)
         ledger.append({"kind": "EVIDENCE", "ref": item["ref"], "action": "OMIT" if reason else "INCLUDE",
                        "reason": reason, "bytes": size(item)})
@@ -97,7 +99,7 @@ def build_context(turn, router, evidence, snapshot, *, previous=None, recent=(),
         proposed_recent = [item] + selected_recent
         proposed = {**payload, "recent_exact_turns": proposed_recent}
         reason = ("INVALIDATED_DERIVED_INPUT" if reasons or not item.get("valid", True) else "RECENT_TAIL_LIMIT" if index >= RECENT_TURNS else
-                  "CONTEXT_BUDGET_EXCEEDED" if stop or size(proposed) > turn.budget_bytes else None)
+                  "CONTEXT_BUDGET_EXCEEDED" if stop or size(proposed) > budget_limit else None)
         ledger.append({"kind": "RECENT_TURN", "ref": item["ref"], "action": "OMIT" if reason else "INCLUDE",
                        "reason": reason, "bytes": size(item)})
         if reason:
@@ -125,8 +127,13 @@ def build_context(turn, router, evidence, snapshot, *, previous=None, recent=(),
                "snapshot": snapshot, "invalidation_status": "REBUILT" if reasons else "VALID",
                "invalidated_fingerprint": previous.get("fingerprint") if previous and reasons else None,
                "invalidation_reasons": reasons, "build_ready": not bool(stop)}
+    if model_budget is not None:
+        working["model_profile_ref"] = model_budget["selected"]
+        working["model_profile_fingerprint"] = model_budget["selected_profile_fingerprint"]
     working["fingerprint"] = fingerprint(working)
     rebuild = reasons or (["TOPIC_REACTIVATED"] if reactivated else ["TURN_ADVANCED"] if previous else ["INITIAL_BUILD"])
+    if model_budget is not None and previous and previous.get("model_profile_fingerprint") != model_budget["selected_profile_fingerprint"]:
+        rebuild = [*rebuild, "MODEL_PROFILE_CHANGED"]
     pack = {"context_version": "context-pack/2", "authority": False, **turn.scope.projection(),
             "topic_id": turn.topic_id, "session_id": turn.session_id, "working_set_ref": working_id,
             "current_refs": [r for r in included if r["status"] == "CURRENT"],
@@ -136,7 +143,7 @@ def build_context(turn, router, evidence, snapshot, *, previous=None, recent=(),
             "unused_layers_state": "N_A", "conflicts": router["conflicts"],
             "input_fingerprint": fingerprint(active_payload), "policy_fingerprint": snapshot["policy_fingerprint"],
             "invalidation_reasons": reasons, "rebuild_reasons": rebuild,
-            "budget": {"unit": "UTF8_COGNITION_INPUT_BYTES", "limit": turn.budget_bytes,
+            "budget": {"unit": "UTF8_COGNITION_INPUT_BYTES", "limit": budget_limit,
                        "required": required, "included_bytes": 0 if stop else size(payload),
                        "omitted_bytes": required if stop else required - size(payload), "silent_truncations": 0},
             "status": "BLOCKED" if stop else "READY", "stop_reason": stop}
@@ -148,6 +155,10 @@ def build_context(turn, router, evidence, snapshot, *, previous=None, recent=(),
             if row["action"] == "INCLUDE":
                 row.update(action="OMIT", reason=stop)
                 pack["omitted"].append({"ref": row["ref"], "reason": stop})
+    if model_budget is not None:
+        pack["model_budget"] = {k: model_budget[k] for k in (
+            "selected", "selected_profile_fingerprint", "requested_budget", "effective_input_budget",
+            "usable_input_capacity", "context_capacity", "output_reserve", "envelope_reserve", "estimator_fingerprint")}
     pack["context_fingerprint"] = fingerprint(pack)
     boot = {"derived_only": True, "authority": False, "working_set_id": working_id,
             "topic_id": turn.topic_id, "source_refs": source_refs,
