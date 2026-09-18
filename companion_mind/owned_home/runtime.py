@@ -16,13 +16,16 @@ from .contracts import (VERSION, HomeError, Turn, encode, evaluate_wake, fingerp
 from .index import LexicalIndex
 from .context import ContextTurn, build_context, invalidation
 from .router import route_authorities
-from .trace import context_trace, model_trace, tool_trace
+from .trace import context_trace, model_trace, tool_trace, human_trace
 from .model_gateway import (CapabilityRegistry, ModelTurn, ProfileRef, call_spec,
                             result_from_terminal, script_frames, spec_matches)
 from .action_control import TOOL_FAULTS, ToolActionControl
 from .tool_gateway import (ActionRequest, SkillRegistry, SyntheticToolAdapter, action_intent,
                            exact_binding, execution_receipt)
 from .permission import POLICY, evaluate_permission
+from .human_control import (HUMAN_FAULTS, IDENTITY, NOW, HumanControl, HumanResponse,
+                            instant, resolve_owner)
+from .continuation import budget_receipt, one_hop, resume_decision
 
 FAULTS = {"AFTER_USER_DURABLE", "AFTER_PROVIDER_INTENT", "AFTER_STUB_FRAME", "BEFORE_DISPLAY"}
 JOURNAL_FAULTS = {"AFTER_PROVIDER_INTENT": "F2", "AFTER_STUB_FRAME": "F3", "BEFORE_DISPLAY": "F5"}
@@ -30,9 +33,12 @@ JOURNAL_FAULTS = {"AFTER_PROVIDER_INTENT": "F2", "AFTER_STUB_FRAME": "F3", "BEFO
 
 class OwnedRuntime:
     def __init__(self, directory, *, scope, fixtures=(), grants=(), fault=None, model_profiles=None,
-                 skill_contracts=None, tool_grants=(), tool_targets=()):
-        if fault is not None and fault not in FAULTS | TOOL_FAULTS:
+                 skill_contracts=None, tool_grants=(), tool_targets=(), human_owners=(), human_now=NOW):
+        if fault is not None and fault not in FAULTS | TOOL_FAULTS | HUMAN_FAULTS:
             raise HomeError("UNKNOWN_FAULT")
+        instant(human_now)
+        self.human_owners, self.human_now = tuple(human_owners), human_now
+        self._human_control = None
         self.scope, self.fixtures, self.grants = scope, tuple(fixtures), tuple(grants)
         self.models = CapabilityRegistry(model_profiles)
         self.skills = SkillRegistry(skill_contracts)
@@ -74,6 +80,8 @@ class OwnedRuntime:
                          "authority_writes": 0}
 
     def close(self):
+        if self._human_control is not None:
+            self._human_control.close()
         if self._tool_adapter is not None:
             self._tool_adapter.close()
         if self._tool_control is not None:
@@ -520,6 +528,231 @@ class OwnedRuntime:
     def wake(self, candidate):
         return evaluate_wake(candidate, self.scope)
 
+    def _humans(self):
+        if self._human_control is None:
+            self._human_control = HumanControl(self.directory / "human-control")
+        return self._human_control
+
+    def _human_events(self, human_request_id=None):
+        return [e for e in self.journal.export() if
+                e["metadata"].get("extensions", {}).get("owned_human", {}).get("scope") == self.scope.projection()
+                and (human_request_id is None or e["metadata"]["extensions"]["owned_human"]["identity"]["human_request_id"] == human_request_id)]
+
+    def _human_evidence(self, record, kind, payload, at):
+        req = record["request"]
+        events = self._human_events(req["human_request_id"])
+        prior = [e for e in events if e["metadata"]["extensions"]["owned_human"]["kind"] == kind]
+        if prior:
+            if len(prior) != 1 or prior[0]["content_payload"] != payload:
+                raise HomeError("HUMAN_EVIDENCE_CONFLICT")
+            return self.journal.ingest("A019", prior[0])
+        key = fingerprint({"request": req["request_fingerprint"], "kind": kind})
+        event_id = "oh-human-" + key
+        control = {"contract_version": "human-evidence/1", "scope": self.scope.projection(),
+                   "identity": {k: req[k] for k in IDENTITY}, "kind": kind,
+                   "request_fingerprint": req["request_fingerprint"], "payload_fingerprint": fingerprint(payload)}
+        event = {"event_id": event_id, "session_id": "oh-human-lane-" + req["request_fingerprint"],
+                 "turn_id": req["turn_id"], "sequence_no": len(events) + 1,
+                 "actor_role": "user" if kind == "RESPONSE" else "assistant" if kind == "TERMINAL" else "system-derived-visible-event",
+                 "message_id": event_id, "persona_id": req["owner_id"], "relationship_id": None,
+                 "provider": "offline-local", "model": "deterministic-slice5", "observed_at": at, "created_at": at,
+                 "content_type": "application/json", "content_payload": payload, "status": "complete",
+                 "source_ref": {"source_kind": "owned_client", "observation_type": "observed",
+                                "source_id": req["human_request_id"], "uri": None, "adapter_version": "human-evidence/1"},
+                 "attachment_ref": [], "correction_id": None, "correction_of": None, "redaction_state": "none",
+                 "metadata": {"adapter": "A019", "adapter_version": "human-evidence/1", "ingest_id": event_id,
+                              "knowledge": {}, "extensions": {"owned_human": control}}}
+        return self.journal.ingest("A019", event)
+
+    def human_preview(self, request):
+        self.counters["continuations"] = 0
+        if request.scope != self.scope:
+            raise HomeError("SCOPE_DENIED")
+        req = request.projection()
+        owner = resolve_owner(req, self.human_owners)
+        return {"status": "REQUEST_READY" if owner["unique"] else "HOLD", "owner": owner,
+                "human_request": req if owner["unique"] else None, "continuation_count": 0,
+                "notifications": 0, "authority": False}
+
+    def human_request(self, request, *, candidate=None):
+        preview = self.human_preview(request)
+        if not preview["owner"]["unique"]:
+            return preview | {"human_requests_created": 0}
+        wake = None
+        if candidate is not None:
+            gate = evaluate_wake(candidate, self.scope)
+            if not all(gate["checks"].values()):
+                return {"status": "SILENT", "wake_gate": gate, "human_requests_created": 0,
+                        "notifications": 0, "continuation_count": 0}
+            wake = {"event_id": candidate.event_id, "candidate_fingerprint": fingerprint(asdict(candidate)),
+                    "checks": gate["checks"], "decision": "REQUEST_HUMAN", "notifications": 0}
+        req = preview["human_request"]
+        if instant(self.human_now) < instant(req["created_at"]):
+            raise HomeError("HUMAN_REQUEST_NOT_YET_VALID")
+        record, created = self._humans().bind(req, preview["owner"], self.human_now, wake)
+        self._tool_fault("HUMAN_AFTER_REQUEST_CONTROL")
+        self._human_recover(record)
+        return self._human_view(record) | {"human_requests_created": int(created)}
+
+    def _human_record(self, human_request_id, request_fingerprint=None):
+        record = self._humans().lookup(human_request_id, self.scope.projection())
+        if not record:
+            raise HomeError("HUMAN_REQUEST_NOT_FOUND")
+        if request_fingerprint is not None and record["request"]["request_fingerprint"] != request_fingerprint:
+            raise HomeError("INVALID_RESPONSE_BINDING")
+        return record
+
+    def _human_owner(self, record):
+        owner = resolve_owner(record["request"], self.human_owners)
+        if owner["owner_fingerprint"] != record["owner"]["owner_fingerprint"]:
+            owner = {**owner, "unique": False, "status": "OWNER_BINDING_CHANGED"}
+            owner.pop("owner_fingerprint")
+            owner["owner_fingerprint"] = fingerprint(owner)
+        return owner
+
+    def _human_finish(self, record, reason):
+        if record["state"] != "TERMINAL":
+            record.update(state="TERMINAL", reason=reason, terminal_at=self.human_now)
+            self._humans().save()
+        if record["continuation"]:
+            self._human_evidence(record, "CONTINUATION", record["continuation"], record["resume_at"])
+        if record["reason"] in {"EXPIRED", "CANCELLED", "RECOVERY_UNKNOWN", "CLOCK_ROLLBACK"}:
+            self._human_evidence(record, record["reason"], {"reason": record["reason"]}, record["terminal_at"])
+        payload = {"reason": record["reason"], "continuation": record["continuation"],
+                   "budget": budget_receipt(record["request"], record["reserved"]),
+                   "response_fingerprint": record["response"]["response_fingerprint"] if record["response"] else None}
+        self._human_evidence(record, "TERMINAL", payload, record["terminal_at"])
+        self._tool_fault("HUMAN_AFTER_TERMINAL_DURABLE")
+
+    def _human_recover(self, record):
+        # Complete durable evidence, never dispatch from observation/reload.
+        self._human_evidence(record, "REQUEST", {"request": record["request"], "owner": record["owner"], "wake": record["wake"]},
+                             record["request"]["created_at"])
+        if record["state"] == "CREATED":
+            self._tool_fault("HUMAN_AFTER_REQUEST_DURABLE")
+            record["state"] = "WAITING"
+            self._humans().save()
+        if record["state"] == "TERMINAL":
+            self._human_finish(record, record["reason"])
+            return
+        if instant(self.human_now) < instant(record["last_observed_at"]):
+            self._human_finish(record, "CLOCK_ROLLBACK")
+            return
+        record["last_observed_at"] = self.human_now
+        # A019 RESPONSE was written before its derived control binding. Recover
+        # exact raw evidence at this crash boundary; do not fabricate human input.
+        if record["response"] is None:
+            rows = [e for e in self._human_events(record["request"]["human_request_id"])
+                    if e["metadata"]["extensions"]["owned_human"]["kind"] == "RESPONSE"]
+            if rows:
+                raw = rows[0]["content_payload"]
+                response = HumanResponse(**raw["raw_response"])
+                projection = response.projection()
+                if (len(rows) != 1 or projection != raw["derived_response"] or
+                        not self._human_exact(record, projection)):
+                    raise HomeError("HUMAN_EVIDENCE_CONFLICT")
+                record.update(response=projection, response_at=rows[0]["observed_at"], state="RESPONSE_DURABLE")
+        self._humans().save()
+        # Once dispatch intent exists, expiry cannot pretend an uncertain hop
+        # never ran. A durable result may only be finalized, never recomputed.
+        if record["reserved"]:
+            self._human_finish(record, "ONE_HOP_COMPLETE" if record["continuation"] else "RECOVERY_UNKNOWN")
+        elif instant(self.human_now) >= instant(record["request"]["expires_at"]):
+            self._human_finish(record, "EXPIRED")
+        elif record["response"] and record["response"]["normalized"]["command"] == "CANCEL":
+            self._human_finish(record, "CANCELLED")
+
+    @staticmethod
+    def _human_exact(record, response):
+        return (all(record["request"][k] == response[k] for k in IDENTITY) and
+                record["request"]["request_fingerprint"] == response["request_fingerprint"])
+
+    def human_respond(self, response):
+        self.counters["continuations"] = 0
+        record = self._human_record(response.human_request_id, response.request_fingerprint)
+        projection = response.projection()
+        if not self._human_exact(record, projection):
+            raise HomeError("INVALID_RESPONSE_BINDING")
+        self._human_recover(record)
+        if not self._human_owner(record)["unique"]:
+            raise HomeError("INVALID_RESPONSE_OWNER")
+        if record["response"]:
+            if record["response"] != projection:
+                raise HomeError("HUMAN_RESPONSE_CONFLICT")
+            return self._human_view(record) | {"response_replay": True}
+        if record["state"] == "TERMINAL":
+            raise HomeError("INVALID_RESPONSE_LIFECYCLE")
+        self._human_evidence(record, "RESPONSE", {"raw_response": asdict(response), "derived_response": projection}, self.human_now)
+        self._tool_fault("HUMAN_AFTER_RESPONSE_EVIDENCE")
+        record.update(response=projection, response_at=self.human_now, state="RESPONSE_DURABLE")
+        self._humans().save()
+        self._tool_fault("HUMAN_AFTER_RESPONSE_DURABLE")
+        if projection["normalized"]["command"] == "CANCEL":
+            self._human_finish(record, "CANCELLED")
+        return self._human_view(record) | {"response_replay": False}
+
+    def human_observe(self, human_request_id):
+        self.counters["continuations"] = 0
+        record = self._humans().lookup(human_request_id, self.scope.projection())
+        if not record:
+            return {"status": "NOT_FOUND", "human_request_id": human_request_id, "continuation_count": 0}
+        self._human_recover(record)
+        return self._human_view(record)
+
+    def human_resume(self, human_request_id, request_fingerprint, *, cancel=False):
+        self.counters["continuations"] = 0
+        record = self._human_record(human_request_id, request_fingerprint)
+        self._human_recover(record)
+        owner = self._human_owner(record)
+        if not owner["unique"] or record["state"] == "TERMINAL":
+            return self._human_view(record)
+        if cancel:
+            self._human_finish(record, "CANCELLED")
+            return self._human_view(record)
+        decision = resume_decision(record["request"], record["response"], owner, record["state"], record["reserved"])
+        if decision["decision"] != "RESUME":
+            return self._human_view(record)
+        record.update(reserved=True, state="RESUME_INTENT_DURABLE", decision=decision, resume_at=self.human_now)
+        self._humans().save()
+        self._human_evidence(record, "RESUME_INTENT", {"decision": decision, "budget": budget_receipt(record["request"], True)}, self.human_now)
+        self._tool_fault("HUMAN_AFTER_RESUME_INTENT")
+        result = one_hop(record["request"], record["response"])
+        self.counters["continuations"] += 1
+        self._tool_fault("HUMAN_AFTER_CONTINUATION")
+        record.update(continuation=result, state="CONTINUATION_COMPLETED")
+        self._humans().save()
+        self._tool_fault("HUMAN_AFTER_CONTINUATION_RECEIPT")
+        self._human_finish(record, "ONE_HOP_COMPLETE")
+        return self._human_view(record)
+
+    def _human_view(self, record):
+        owner = self._human_owner(record)
+        reason = record["reason"]
+        decision = resume_decision(record["request"], record["response"], owner, record["state"], record["reserved"], reason)
+        events = self._human_events(record["request"]["human_request_id"])
+        count = 1 if record["continuation"] else "UNKNOWN" if record["reserved"] else 0
+        status = ("HOLD" if not owner["unique"] else "UNKNOWN" if count == "UNKNOWN" or reason == "CLOCK_ROLLBACK"
+                  else "STOP" if record["state"] == "TERMINAL" else "RESPONSE_DURABLE" if record["response"] else "WAITING")
+        value = {"contract_version": "human-control-projection/1", "status": status,
+                 "human_request": record["request"] if owner["unique"] else None,
+                 "human_response": record["response"] if owner["unique"] else None,
+                 "state": record["state"], "owner": owner, "resume_decision": decision,
+                 "executed_decision": record["decision"], "stop_reason": reason,
+                 "budget": budget_receipt(record["request"], record["reserved"]),
+                 "continuation": record["continuation"] if owner["unique"] else None,
+                 "continuation_count": count, "continuation_upper_bound": int(record["reserved"]),
+                 "continuations_this_call": self.counters["continuations"],
+                 "terminal_count": sum(e["actor_role"] == "assistant" for e in events),
+                 "evidence": [{"kind": e["metadata"]["extensions"]["owned_human"]["kind"],
+                               "event_id": e["event_id"], "receipt": self.journal.ingest("A019", e)} for e in events],
+                 "wake_gate": record["wake"], "authority": False, "canonical_evidence_owner": "A019",
+                 "mutable_execution_control_only": True, "automatic_resumes": 0,
+                 "notifications": 0, "authority_mutation_count": 0, "real_credential_reads": 0,
+                 "real_external_side_effects": 0,
+                 "presentation_order": ["EXACT_OWNER", "HUMAN_REQUEST_CONTROL_DURABLE", "A019_REQUEST_DURABLE", "DISPLAY"]}
+        value["trace"] = human_trace(record, value)
+        return value
+
     def _tools(self):
         if self._tool_control is None:
             self._tool_control = ToolActionControl(self.directory / "tool-control")
@@ -736,4 +969,7 @@ class OwnedRuntime:
                  "sequence_no": e["sequence_no"], "request_id": e["metadata"]["extensions"]["owned_home"]["identity"]["request_id"],
                  "receipt": self.journal.ingest("A019", e),
                  **({"tool_evidence": self._control(e)["projection"]["tool_evidence"]}
-                    if self._control(e).get("projection", {}).get("tool_evidence") else {})} for e in self._events()]
+                    if self._control(e).get("projection", {}).get("tool_evidence") else {})} for e in self._events()] + [
+            {"event_id": e["event_id"], "actor_role": e["actor_role"], "sequence_no": e["sequence_no"],
+             "human_evidence": e["metadata"]["extensions"]["owned_human"],
+             "receipt": self.journal.ingest("A019", e)} for e in self._human_events()]

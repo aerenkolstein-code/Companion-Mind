@@ -15,6 +15,16 @@ skill_contracts, tool_targets and tool_grants: fixed semantics, public synthetic
 metadata only. P3/P4 have no execution or human-override path. A duplicate action
 returns its durable receipt; only explicit resume can finish a pending action.
 No production source/credential adapters or internal database operations exist.
+Human operations: human_preview/human_request(human_request),
+human_respond(human_response), human_observe(human_request_id),
+human_resume/human_cancel(human_request_id,request_fingerprint), and
+human_wake(human_request,candidate). Trusted setup: human_owners (public
+OwnerFixture list), human_now (explicit synthetic clock). Raw responses are
+bounded public commands CONTINUE/HOLD/CANCEL/UNSURE/empty. No arbitrary prose.
+The request itself is the durable interrupted local task checkpoint. Each exact
+goal/task may reserve one hop; uncertainty is terminal UNKNOWN, never a retry.
+Browser setup is server-owned, with a current UTC clock. Its storage holds only
+request identity and lifetime; it never persists response text or derived output.
 Exit 0=receipt, 2=safe refusal, 86=declared subprocess crash; no auto-resume.
 """
 import argparse
@@ -31,11 +41,25 @@ from .model_gateway import ModelProfile, ModelTurn, ProfileRef
 from .action_control import TOOL_FAULTS
 from .tool_gateway import ActionRequest, SkillContract, ToolTarget
 from .permission import SyntheticGrant
+from .human_control import HUMAN_FAULTS, NOW, HumanRequest, HumanResponse, OwnerFixture, instant
 
 
 def validate_operation(operation):
     op = operation.get("op") if isinstance(operation, dict) else None
-    if op in {"action_preview", "permission_evaluate", "tool_execute"}:
+    if op in {"human_preview", "human_request", "human_wake"}:
+        exact_keys(operation, ("op", "human_request", "candidate") if op == "human_wake" else ("op", "human_request"))
+        HumanRequest(**operation["human_request"])
+        if op == "human_wake":
+            WakeCandidate(**operation["candidate"])
+    elif op == "human_respond":
+        exact_keys(operation, ("op", "human_response"))
+        HumanResponse(**operation["human_response"])
+    elif op in {"human_observe", "human_resume", "human_cancel"}:
+        exact_keys(operation, ("op", "human_request_id") if op == "human_observe" else ("op", "human_request_id", "request_fingerprint"))
+        identifier(operation["human_request_id"])
+        if op != "human_observe":
+            identifier(operation["request_fingerprint"])
+    elif op in {"action_preview", "permission_evaluate", "tool_execute"}:
         exact_keys(operation, ("op", "action"), ("expected_intent", "expected_decision", "resume") if op == "tool_execute"
                    else ("expected_intent", "expected_decision"))
         ActionRequest(**operation["action"])
@@ -94,10 +118,11 @@ class OwnedHomeTestPort:
     version = VERSION
 
     def __init__(self, directory, *, scope, fixtures=(), grants=(), fault=None, model_profiles=None,
-                 skill_contracts=None, tool_grants=(), tool_targets=()):
+                 skill_contracts=None, tool_grants=(), tool_targets=(), human_owners=(), human_now=NOW):
         self.__runtime = OwnedRuntime(directory, scope=scope, fixtures=fixtures, grants=grants,
                                       fault=fault, model_profiles=model_profiles, skill_contracts=skill_contracts,
-                                      tool_grants=tool_grants, tool_targets=tool_targets)
+                                      tool_grants=tool_grants, tool_targets=tool_targets,
+                                      human_owners=human_owners, human_now=human_now)
 
     def close(self):
         self.__runtime.close()
@@ -111,6 +136,17 @@ class OwnedHomeTestPort:
     def execute(self, operation):
         validate_operation(operation)
         op = operation.get("op")
+        if op in {"human_preview", "human_request", "human_wake"}:
+            request = HumanRequest(**operation["human_request"])
+            if op == "human_preview":
+                return self.__runtime.human_preview(request)
+            return self.__runtime.human_request(request, candidate=WakeCandidate(**operation["candidate"]) if op == "human_wake" else None)
+        if op == "human_respond":
+            return self.__runtime.human_respond(HumanResponse(**operation["human_response"]))
+        if op == "human_observe":
+            return self.__runtime.human_observe(operation["human_request_id"])
+        if op in {"human_resume", "human_cancel"}:
+            return self.__runtime.human_resume(operation["human_request_id"], operation["request_fingerprint"], cancel=op == "human_cancel")
         if op == "skill_registry":
             return self.__runtime.skill_registry()
         if op == "skill_lookup":
@@ -163,6 +199,8 @@ class OwnedHomeTestPort:
                     "model_gateway_version": "synthetic-model-gateway/1", "model_invocation_owner": "A019",
                     "tool_gateway_version": "synthetic-tool-gateway/1", "tool_fault_points": sorted(TOOL_FAULTS),
                     "tool_control": "MUTABLE_EXECUTION_ONLY", "human_override": False,
+                    "human_control": "MUTABLE_EXECUTION_ONLY", "human_fault_points": sorted(HUMAN_FAULTS),
+                    "human_ops": ["human_preview", "human_request", "human_respond", "human_observe", "human_resume", "human_cancel", "human_wake"],
                     "tool_ops": ["skill_registry", "skill_lookup", "action_preview", "permission_evaluate", "tool_execute", "tool_observe", "tool_resume"],
                     "fault_points": sorted(FAULTS), "supported_ops": ["turn", "observe", "resume", "safe_export", "wake", "rebuild", "info", "context_turn", "topic_switch", "session_state", "model_registry", "model_lookup", "model_preview", "model_validate_spec", "model_turn"]}
         raise HomeError("OPERATION_NOT_IN_SLICE")
@@ -175,7 +213,7 @@ def execute(directory, request, *, fault=None):
     optional = ("fixtures", "grants", "turn", "resume", "request_id", "candidate", "source_id", "version", "session_id",
                 "model_profiles", "profile_key", "profile_version", "spec", "expected_spec",
                 "skill_contracts", "tool_grants", "tool_targets", "action", "action_id", "skill_id", "skill_version",
-                "expected_intent", "expected_decision")
+                "expected_intent", "expected_decision", "human_owners", "human_now", "human_request", "human_response", "human_request_id", "request_fingerprint")
     exact_keys(request, required, optional)
     if request["contract_version"] != VERSION:
         raise HomeError("CONTRACT_VERSION_MISMATCH")
@@ -186,6 +224,12 @@ def execute(directory, request, *, fault=None):
     if model_profiles is not None and (not isinstance(model_profiles, list) or len(model_profiles) > 16):
         raise HomeError("INVALID_PROFILE_REGISTRY")
     setup = {}
+    owners = request.get("human_owners", [])
+    if not isinstance(owners, list) or len(owners) > 16:
+        raise HomeError("OWNER_FIXTURE_LIMIT")
+    setup["human_owners"] = [OwnerFixture(**o) for o in owners]
+    setup["human_now"] = request.get("human_now", NOW)
+    instant(setup["human_now"])
     for key, cls, maximum in (("skill_contracts", SkillContract, 16), ("tool_grants", SyntheticGrant, 32), ("tool_targets", ToolTarget, 16)):
         value = request.get(key)
         if value is not None and (not isinstance(value, list) or len(value) > maximum):
@@ -204,7 +248,7 @@ def execute(directory, request, *, fault=None):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--store", required=True)
-    parser.add_argument("--fault", choices=sorted(FAULTS | TOOL_FAULTS))
+    parser.add_argument("--fault", choices=sorted(FAULTS | TOOL_FAULTS | HUMAN_FAULTS))
     args = parser.parse_args()
     try:
         payload = sys.stdin.buffer.read(1_048_577)

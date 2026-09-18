@@ -2,6 +2,24 @@
 from .contracts import fingerprint
 
 
+def human_trace(record, projection):
+    req = record["request"]
+    value = {"trace_version": "human-trace/1", "authority": False,
+             "identity": {k: req[k] for k in ("human_request_id", "request_id", "trace_id", "goal_id", "task_id",
+                                             "session_id", "turn_id", "turn_no", "universe_id", "access_subject_id", "owner_id")},
+             "request_fingerprint": req["request_fingerprint"], "request_state": record["state"],
+             "response_fingerprint": record["response"]["response_fingerprint"] if record["response"] else None,
+             "raw_payload_fingerprint": record["response"]["raw_payload_fingerprint"] if record["response"] else None,
+             "normalized_fingerprint": record["response"]["normalized_fingerprint"] if record["response"] else None,
+             "raw_evidence_owner": "A019", "normalized_is_derived": True,
+             "resume_decision": projection["resume_decision"], "budget": projection["budget"],
+             "owner": projection["owner"], "recovery_outcome": projection["status"],
+             "continuation_count": projection["continuation_count"], "continuation_upper_bound": projection["continuation_upper_bound"],
+             "automatic_resumes": 0, "notifications": 0, "authority_mutation_count": 0,
+             "real_credential_reads": 0, "real_external_side_effects": 0}
+    return {**value, "trace_fingerprint": fingerprint(value)}
+
+
 def tool_trace(intent, decision, control, receipt):
     value = {"trace_version": "tool-trace/1", "skill_ref": intent["skill_ref"],
              "skill_fingerprint": intent["skill_fingerprint"], "action_id": intent["action_id"],
