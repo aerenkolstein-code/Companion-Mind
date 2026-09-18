@@ -8,6 +8,12 @@ turn adds turn:{Turn fields} and optional resume:true. observe/resume add reques
 resume reconstructs the original turn from A019, without client-held content.
 wake adds candidate:{WakeCandidate fields}; rebuild adds source_id,version.
 Fixtures/grants are trusted, explicit synthetic test setup, not UI input.
+Tool operations: skill_registry; skill_lookup(skill_id,skill_version);
+action_preview/permission_evaluate/tool_execute(action,expected_intent?,
+expected_decision?); tool_observe/tool_resume(action_id). Tool setup accepts
+skill_contracts, tool_targets and tool_grants: fixed semantics, public synthetic
+metadata only. P3/P4 have no execution or human-override path. A duplicate action
+returns its durable receipt; only explicit resume can finish a pending action.
 No production source/credential adapters or internal database operations exist.
 Exit 0=receipt, 2=safe refusal, 86=declared subprocess crash; no auto-resume.
 """
@@ -22,11 +28,32 @@ from .runtime import FAULTS, OwnedRuntime
 from .context import ContextTurn
 from .router import SourceRevision
 from .model_gateway import ModelProfile, ModelTurn, ProfileRef
+from .action_control import TOOL_FAULTS
+from .tool_gateway import ActionRequest, SkillContract, ToolTarget
+from .permission import SyntheticGrant
 
 
 def validate_operation(operation):
     op = operation.get("op") if isinstance(operation, dict) else None
-    if op in {"model_turn", "model_preview", "model_validate_spec"}:
+    if op in {"action_preview", "permission_evaluate", "tool_execute"}:
+        exact_keys(operation, ("op", "action"), ("expected_intent", "expected_decision", "resume") if op == "tool_execute"
+                   else ("expected_intent", "expected_decision"))
+        ActionRequest(**operation["action"])
+        if type(operation.get("resume", False)) is not bool:
+            raise HomeError("INVALID_RESUME")
+        for key in ("expected_intent", "expected_decision"):
+            if key in operation and not isinstance(operation[key], dict):
+                raise HomeError("INVALID_TOOL_BINDING")
+    elif op == "skill_registry":
+        exact_keys(operation, ("op",))
+    elif op == "skill_lookup":
+        exact_keys(operation, ("op", "skill_id", "skill_version"))
+        identifier(operation["skill_id"])
+        identifier(operation["skill_version"])
+    elif op in {"tool_observe", "tool_resume"}:
+        exact_keys(operation, ("op", "action_id"))
+        identifier(operation["action_id"])
+    elif op in {"model_turn", "model_preview", "model_validate_spec"}:
         required = ("op", "turn", "spec") if op == "model_validate_spec" else ("op", "turn")
         exact_keys(operation, required, ("resume", "expected_spec") if op == "model_turn" else ())
         ModelTurn(**operation["turn"])
@@ -66,9 +93,11 @@ def validate_operation(operation):
 class OwnedHomeTestPort:
     version = VERSION
 
-    def __init__(self, directory, *, scope, fixtures=(), grants=(), fault=None, model_profiles=None):
+    def __init__(self, directory, *, scope, fixtures=(), grants=(), fault=None, model_profiles=None,
+                 skill_contracts=None, tool_grants=(), tool_targets=()):
         self.__runtime = OwnedRuntime(directory, scope=scope, fixtures=fixtures, grants=grants,
-                                      fault=fault, model_profiles=model_profiles)
+                                      fault=fault, model_profiles=model_profiles, skill_contracts=skill_contracts,
+                                      tool_grants=tool_grants, tool_targets=tool_targets)
 
     def close(self):
         self.__runtime.close()
@@ -82,6 +111,18 @@ class OwnedHomeTestPort:
     def execute(self, operation):
         validate_operation(operation)
         op = operation.get("op")
+        if op == "skill_registry":
+            return self.__runtime.skill_registry()
+        if op == "skill_lookup":
+            return self.__runtime.skill_registry(operation["skill_id"], operation["skill_version"])
+        if op in {"tool_observe", "tool_resume"}:
+            return self.__runtime.tool_observe(operation["action_id"], resume=op == "tool_resume")
+        if op in {"action_preview", "permission_evaluate", "tool_execute"}:
+            options = {k: operation[k] for k in ("expected_intent", "expected_decision") if k in operation}
+            action = ActionRequest(**operation["action"])
+            if op == "tool_execute":
+                return self.__runtime.tool_execute(action, resume=operation.get("resume", False), **options)
+            return self.__runtime.action_preview(action, **options)
         if op == "model_turn":
             return self.__runtime.submit(ModelTurn(**operation["turn"]), resume=operation.get("resume", False),
                                          expected_spec=operation.get("expected_spec"))
@@ -120,6 +161,9 @@ class OwnedHomeTestPort:
                     "automatic_resume": False, "FTS5": True, "index_relation": "SEPARATE_FROM_A019",
                     "context_version": "context-pack/2", "recent_turn_limit": 4, "evidence_limit": 5,
                     "model_gateway_version": "synthetic-model-gateway/1", "model_invocation_owner": "A019",
+                    "tool_gateway_version": "synthetic-tool-gateway/1", "tool_fault_points": sorted(TOOL_FAULTS),
+                    "tool_control": "MUTABLE_EXECUTION_ONLY", "human_override": False,
+                    "tool_ops": ["skill_registry", "skill_lookup", "action_preview", "permission_evaluate", "tool_execute", "tool_observe", "tool_resume"],
                     "fault_points": sorted(FAULTS), "supported_ops": ["turn", "observe", "resume", "safe_export", "wake", "rebuild", "info", "context_turn", "topic_switch", "session_state", "model_registry", "model_lookup", "model_preview", "model_validate_spec", "model_turn"]}
         raise HomeError("OPERATION_NOT_IN_SLICE")
 
@@ -129,7 +173,9 @@ def execute(directory, request, *, fault=None):
         raise HomeError("INVALID_SHAPE")
     required = ("contract_version", "scope", "op")
     optional = ("fixtures", "grants", "turn", "resume", "request_id", "candidate", "source_id", "version", "session_id",
-                "model_profiles", "profile_key", "profile_version", "spec", "expected_spec")
+                "model_profiles", "profile_key", "profile_version", "spec", "expected_spec",
+                "skill_contracts", "tool_grants", "tool_targets", "action", "action_id", "skill_id", "skill_version",
+                "expected_intent", "expected_decision")
     exact_keys(request, required, optional)
     if request["contract_version"] != VERSION:
         raise HomeError("CONTRACT_VERSION_MISMATCH")
@@ -139,20 +185,26 @@ def execute(directory, request, *, fault=None):
     model_profiles = request.get("model_profiles")
     if model_profiles is not None and (not isinstance(model_profiles, list) or len(model_profiles) > 16):
         raise HomeError("INVALID_PROFILE_REGISTRY")
-    operation = {k: v for k, v in request.items() if k not in {"contract_version", "scope", "fixtures", "grants", "model_profiles"}}
+    setup = {}
+    for key, cls, maximum in (("skill_contracts", SkillContract, 16), ("tool_grants", SyntheticGrant, 32), ("tool_targets", ToolTarget, 16)):
+        value = request.get(key)
+        if value is not None and (not isinstance(value, list) or len(value) > maximum):
+            raise HomeError("TOOL_FIXTURE_LIMIT")
+        setup[key] = None if key == "skill_contracts" and value is None else [cls(**item) for item in (value or [])]
+    operation = {k: v for k, v in request.items() if k not in {"contract_version", "scope", "fixtures", "grants", "model_profiles", *setup}}
     # Validate untrusted operation bodies before opening any persistent store.
     validate_operation(operation)
     with OwnedHomeTestPort(directory, scope=Scope(**request["scope"]),
                            fixtures=[(SourceRevision if "revision" in f or "lifecycle" in f else AuthorityFixture)(**f) for f in fixtures],
                            grants=[Grant(**g) for g in grants], fault=fault,
-                           model_profiles=None if model_profiles is None else [ModelProfile(**p) for p in model_profiles]) as port:
+                           model_profiles=None if model_profiles is None else [ModelProfile(**p) for p in model_profiles], **setup) as port:
         return port.execute(operation)
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--store", required=True)
-    parser.add_argument("--fault", choices=sorted(FAULTS))
+    parser.add_argument("--fault", choices=sorted(FAULTS | TOOL_FAULTS))
     args = parser.parse_args()
     try:
         payload = sys.stdin.buffer.read(1_048_577)
