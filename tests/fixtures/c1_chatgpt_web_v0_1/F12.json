@@ -1,0 +1,28 @@
+{
+  "fixture_id": "F12",
+  "purpose": "Same identity and different fingerprint",
+  "origin": "hand-authored synthetic / public-safe / no real conversation",
+  "snapshots": [
+    {
+      "html": "<main data-c1-conversation=\"synthetic-chatgpt\" data-c1-profile=\"0.1\" data-c1-vendor=\"chatgpt\" data-c1-mode=\"desktop-light-en\" data-c1-scope=\"local-synthetic-user\" data-c1-id=\"conv-01\" ><article data-c1-message=\"m-01\" data-c1-role=\"user\" data-c1-order=\"1\" data-c1-state=\"complete\" ><span data-c1-role-label=\"user\">You</span><div data-c1-content>version one</div></article></main>",
+      "expected": {
+        "count": 1,
+        "payloads": ["version one"],
+        "roles": ["user"],
+        "control_states": ["TERMINAL_OBSERVED"],
+        "terminals": ["complete"]
+      }
+    },
+    {
+      "html": "<main data-c1-conversation=\"synthetic-chatgpt\" data-c1-profile=\"0.1\" data-c1-vendor=\"chatgpt\" data-c1-mode=\"desktop-light-en\" data-c1-scope=\"local-synthetic-user\" data-c1-id=\"conv-01\" ><article data-c1-message=\"m-01\" data-c1-role=\"user\" data-c1-order=\"1\" data-c1-state=\"complete\" ><span data-c1-role-label=\"user\">You</span><div data-c1-content>version two</div></article></main>",
+      "expected": {
+        "count": 1,
+        "payloads": ["version two"],
+        "roles": ["user"],
+        "control_states": ["TERMINAL_OBSERVED"],
+        "terminals": ["complete"]
+      }
+    }
+  ],
+  "replay": "CONFLICT"
+}
