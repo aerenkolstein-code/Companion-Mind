@@ -1,0 +1,276 @@
+{
+  "work_order": "WO-ENG-C1-A018-S1-01",
+  "version": "0.1",
+  "stage": "S1",
+  "g1_families": {
+    "G1-01": {
+      "obligation": "Identity isolation and strict detached Capture admission",
+      "test_ids": [
+        "S1IdentityTests.test_g1_01_identity_and_scope_separation",
+        "S1IdentityTests.test_g1_01_forged_hash_subclass_and_missing_fields_rejected",
+        "S1IdentityTests.test_g1_01_accepted_values_are_detached_from_caller"
+      ],
+      "evaluation": "EXECUTE_TESTS_FOR_RESULT_NOT_A_PASS_CLAIM"
+    },
+    "G1-02": {
+      "obligation": "S0 normalization/fingerprint inheritance",
+      "test_ids": [
+        "S1IdentityTests.test_g1_02_normalization_fingerprint_fields_preserved"
+      ],
+      "evaluation": "EXECUTE_TESTS_FOR_RESULT_NOT_A_PASS_CLAIM"
+    },
+    "G1-03": {
+      "obligation": "F08/F09 virtualization and reload",
+      "test_ids": [
+        "S1IdentityTests.test_g1_03_virtualization_reload_and_missing_identity"
+      ],
+      "evaluation": "EXECUTE_TESTS_FOR_RESULT_NOT_A_PASS_CLAIM"
+    },
+    "G1-04": {
+      "obligation": "F10/F11 duplicate-tab replay",
+      "test_ids": [
+        "S1IdentityTests.test_g1_04_tabs_order_and_scope"
+      ],
+      "evaluation": "EXECUTE_TESTS_FOR_RESULT_NOT_A_PASS_CLAIM"
+    },
+    "G1-05": {
+      "obligation": "F12 atomic fingerprint conflict",
+      "test_ids": [
+        "S1IdentityTests.test_g1_05_conflict_batch_is_atomic"
+      ],
+      "evaluation": "EXECUTE_TESTS_FOR_RESULT_NOT_A_PASS_CLAIM"
+    },
+    "G1-06": {
+      "obligation": "F13 whole-set temporary-to-stable reconciliation",
+      "test_ids": [
+        "S1IdentityTests.test_g1_06_reconciliation_arrival_orders_and_detachment",
+        "S1IdentityTests.test_g1_06_whole_set_and_stable_only_members"
+      ],
+      "evaluation": "EXECUTE_TESTS_FOR_RESULT_NOT_A_PASS_CLAIM"
+    },
+    "G1-07": {
+      "obligation": "Mapping rejection and many-to-one evidence",
+      "test_ids": [
+        "S1IdentityTests.test_g1_07_mapping_rejections_are_atomic",
+        "S1IdentityTests.test_g1_07_multiple_temporary_proofs_and_late_position_conflict"
+      ],
+      "evaluation": "EXECUTE_TESTS_FOR_RESULT_NOT_A_PASS_CLAIM"
+    },
+    "G1-08": {
+      "obligation": "Position/role ambiguity and arrival order",
+      "test_ids": [
+        "S1IdentityTests.test_g1_08_position_role_and_unknown"
+      ],
+      "evaluation": "EXECUTE_TESTS_FOR_RESULT_NOT_A_PASS_CLAIM"
+    },
+    "G1-09": {
+      "obligation": "Nonterminal whole-batch HOLD",
+      "test_ids": [
+        "S1IdentityTests.test_g1_09_streaming_stabilizing_hold_and_terminal",
+        "S1IdentityTests.test_g1_09_mixed_hold_withholds_entire_batch"
+      ],
+      "evaluation": "EXECUTE_TESTS_FOR_RESULT_NOT_A_PASS_CLAIM"
+    },
+    "G1-10": {
+      "obligation": "Secret boundary and forbidden exits",
+      "test_ids": [
+        "S1IdentityTests.test_g1_10_secret_input_and_unsafe_references_rejected",
+        "S1IdentityTests.test_g1_10_split_markup_and_forbidden_surface"
+      ],
+      "evaluation": "EXECUTE_TESTS_FOR_RESULT_NOT_A_PASS_CLAIM"
+    },
+    "G1-11": {
+      "obligation": "100 combined incremental replay cycles",
+      "test_ids": [
+        "S1IdentityTests.test_g1_11_hundred_combined_replay_cycles"
+      ],
+      "evaluation": "EXECUTE_TESTS_FOR_RESULT_NOT_A_PASS_CLAIM"
+    },
+    "G1-12": {
+      "obligation": "Exact base source and preflight protection",
+      "test_ids": [
+        "S1IdentityTests.test_g1_12_exact_source_and_preflight_boundary"
+      ],
+      "evaluation": "EXECUTE_TESTS_FOR_RESULT_NOT_A_PASS_CLAIM"
+    }
+  },
+  "proofs": {
+    "P01": {
+      "obligation": "No second Authority",
+      "inherited_from": "docs/browser_sidecar/adr/proof-test-mapping.json",
+      "inherited_base_blob": "cc4113a31938cdb01d5ad6d2e2ec74fb8efcfffc",
+      "s1_test_families": [
+        "G1-08",
+        "G1-10"
+      ],
+      "evidence_scope": "INHERITED_OBLIGATION_WITH_S1_BOUNDARY_CHECK",
+      "limit": "S1 has no second writer; later S2/S3 runtime obligations remain."
+    },
+    "P02": {
+      "obligation": "Canonical output only through A019",
+      "inherited_from": "docs/browser_sidecar/adr/proof-test-mapping.json",
+      "inherited_base_blob": "cc4113a31938cdb01d5ad6d2e2ec74fb8efcfffc",
+      "s1_test_families": [
+        "G1-08",
+        "G1-10"
+      ],
+      "evidence_scope": "INHERITED_OBLIGATION_WITH_S1_BOUNDARY_CHECK",
+      "limit": "No S1 canonical mapper/ingest; actual A019 receipt handling remains S3."
+    },
+    "P03": {
+      "obligation": "browser_sidecar/observed provenance",
+      "inherited_from": "docs/browser_sidecar/adr/proof-test-mapping.json",
+      "inherited_base_blob": "cc4113a31938cdb01d5ad6d2e2ec74fb8efcfffc",
+      "s1_test_families": [
+        "G1-12"
+      ],
+      "evidence_scope": "INHERITED_OBLIGATION_WITH_S1_BOUNDARY_CHECK",
+      "limit": "S0 provenance/contract unchanged; real canonical mapping remains S3."
+    },
+    "P04": {
+      "obligation": "No USER-before-provider claim",
+      "inherited_from": "docs/browser_sidecar/adr/proof-test-mapping.json",
+      "inherited_base_blob": "cc4113a31938cdb01d5ad6d2e2ec74fb8efcfffc",
+      "s1_test_families": [
+        "G1-09",
+        "G1-10"
+      ],
+      "evidence_scope": "INHERITED_OBLIGATION_WITH_S1_BOUNDARY_CHECK",
+      "limit": "Observer only; no control of provider dispatch."
+    },
+    "P05": {
+      "obligation": "Complete/partial/failed evidence",
+      "inherited_from": "docs/browser_sidecar/adr/proof-test-mapping.json",
+      "inherited_base_blob": "cc4113a31938cdb01d5ad6d2e2ec74fb8efcfffc",
+      "s1_test_families": [
+        "G1-02",
+        "G1-09"
+      ],
+      "evidence_scope": "INHERITED_OBLIGATION_WITH_S1_BOUNDARY_CHECK",
+      "limit": "Static parser terminal candidate admission/HOLD only; S4 live controller deferred."
+    },
+    "P06": {
+      "obligation": "Reload/virtualization identity",
+      "inherited_from": "docs/browser_sidecar/adr/proof-test-mapping.json",
+      "inherited_base_blob": "cc4113a31938cdb01d5ad6d2e2ec74fb8efcfffc",
+      "s1_test_families": [
+        "G1-01",
+        "G1-03",
+        "G1-05",
+        "G1-06",
+        "G1-07",
+        "G1-08",
+        "G1-11"
+      ],
+      "evidence_scope": "S1_NEW_IDENTITY_PROOF",
+      "limit": "Incremental sequential in-memory synthetic observations only; no durable restart or real DOM evidence."
+    },
+    "P07": {
+      "obligation": "Duplicate tab no amplification",
+      "inherited_from": "docs/browser_sidecar/adr/proof-test-mapping.json",
+      "inherited_base_blob": "cc4113a31938cdb01d5ad6d2e2ec74fb8efcfffc",
+      "s1_test_families": [
+        "G1-04",
+        "G1-06",
+        "G1-11"
+      ],
+      "evidence_scope": "S1_NEW_IDENTITY_PROOF",
+      "limit": "Synthetic interleaved observations only; real concurrent tabs are not exercised."
+    },
+    "P08": {
+      "obligation": "Staging crash recovery no false commit",
+      "inherited_from": "docs/browser_sidecar/adr/proof-test-mapping.json",
+      "inherited_base_blob": "cc4113a31938cdb01d5ad6d2e2ec74fb8efcfffc",
+      "s1_test_families": [
+        "G1-10"
+      ],
+      "evidence_scope": "INHERITED_OBLIGATION_WITH_S1_BOUNDARY_CHECK",
+      "limit": "No staging implementation or crash-recovery proof; S2 deferred."
+    },
+    "P09": {
+      "obligation": "Safe attachment provenance",
+      "inherited_from": "docs/browser_sidecar/adr/proof-test-mapping.json",
+      "inherited_base_blob": "cc4113a31938cdb01d5ad6d2e2ec74fb8efcfffc",
+      "s1_test_families": [
+        "G1-02",
+        "G1-10"
+      ],
+      "evidence_scope": "INHERITED_OBLIGATION_WITH_S1_BOUNDARY_CHECK",
+      "limit": "Validate already-scrubbed static reference fields only; no binary capture/download."
+    },
+    "P10": {
+      "obligation": "Secret before durable persistence",
+      "inherited_from": "docs/browser_sidecar/adr/proof-test-mapping.json",
+      "inherited_base_blob": "cc4113a31938cdb01d5ad6d2e2ec74fb8efcfffc",
+      "s1_test_families": [
+        "G1-10"
+      ],
+      "evidence_scope": "INHERITED_OBLIGATION_WITH_S1_BOUNDARY_CHECK",
+      "limit": "S0 declared scrub patterns only; actual durable staging boundary is S2."
+    },
+    "P11": {
+      "obligation": "Vendor drift fail closed",
+      "inherited_from": "docs/browser_sidecar/adr/proof-test-mapping.json",
+      "inherited_base_blob": "cc4113a31938cdb01d5ad6d2e2ec74fb8efcfffc",
+      "s1_test_families": [
+        "G1-01",
+        "G1-02"
+      ],
+      "evidence_scope": "INHERITED_OBLIGATION_WITH_S1_BOUNDARY_CHECK",
+      "limit": "Frozen synthetic profile only; production selectors remain NOT_VERIFIED."
+    },
+    "P12": {
+      "obligation": "C1/C2 controller and provenance separation",
+      "inherited_from": "docs/browser_sidecar/adr/proof-test-mapping.json",
+      "inherited_base_blob": "cc4113a31938cdb01d5ad6d2e2ec74fb8efcfffc",
+      "s1_test_families": [
+        "G1-10",
+        "G1-12"
+      ],
+      "evidence_scope": "INHERITED_OBLIGATION_WITH_S1_BOUNDARY_CHECK",
+      "limit": "S0/C2 and other base files unchanged; no live controller integration."
+    },
+    "P13": {
+      "obligation": "A019 conflict/receipt visible",
+      "inherited_from": "docs/browser_sidecar/adr/proof-test-mapping.json",
+      "inherited_base_blob": "cc4113a31938cdb01d5ad6d2e2ec74fb8efcfffc",
+      "s1_test_families": [
+        "G1-05",
+        "G1-07",
+        "G1-08"
+      ],
+      "evidence_scope": "S1_SOURCE_LOCAL_CONFLICT_ONLY",
+      "limit": "New source-local conflict proof only; A019 conflict/receipt integration remains S3."
+    },
+    "P14": {
+      "obligation": "Drive replica owned by A019",
+      "inherited_from": "docs/browser_sidecar/adr/proof-test-mapping.json",
+      "inherited_base_blob": "cc4113a31938cdb01d5ad6d2e2ec74fb8efcfffc",
+      "s1_test_families": [
+        "G1-10",
+        "G1-12"
+      ],
+      "evidence_scope": "INHERITED_OBLIGATION_WITH_S1_BOUNDARY_CHECK",
+      "limit": "No S1 writer; actual replica remains A019, not implemented or invoked here."
+    },
+    "P15": {
+      "obligation": "Technical gate distinct from W1",
+      "inherited_from": "docs/browser_sidecar/adr/proof-test-mapping.json",
+      "inherited_base_blob": "cc4113a31938cdb01d5ad6d2e2ec74fb8efcfffc",
+      "s1_test_families": [
+        "G1-10"
+      ],
+      "evidence_scope": "INHERITED_OBLIGATION_WITH_S1_BOUNDARY_CHECK",
+      "limit": "Test execution is developer evidence, not independent G1, merge, W1 or product acceptance."
+    }
+  },
+  "full_regression_required": [
+    "G0-01..27",
+    "python -m unittest discover -s tests -v",
+    "python tools/a019_conformance.py --output TEMP/a019-conformance.json",
+    "node tests/test_chatgpt_recovery_verify.mjs",
+    "node tests/test_chatgpt_recovery_reconcile.mjs",
+    "existing Test workflow CLI demo/replay/cmp and validate-mitigation"
+  ],
+  "result_policy": "This file maps executable checks, not results. Bind actual local/CI logs to exact head; list missing evidence; independent G1 acceptance is separate. Existing S0 test count is not a new S1 result."
+}
