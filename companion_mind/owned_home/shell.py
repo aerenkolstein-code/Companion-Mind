@@ -6,6 +6,7 @@ trusted process; browser ingress can only submit/recover its fixed owner scope.
 No production provider, credentials, filesystem browsing or connector routes.
 """
 import argparse
+from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, HTTPServer
 import json
 from pathlib import Path
@@ -17,7 +18,8 @@ from .contracts import (VERSION, AuthorityFixture, Grant, HomeError, Scope, Turn
 from .runtime import OwnedRuntime
 from .context import ContextTurn
 from .model_gateway import ModelTurn
-from .testport import validate_operation
+from .testport import OwnedHomeTestPort, validate_operation
+from .human_control import OwnerFixture
 from .tool_gateway import ActionRequest, ToolTarget
 from .permission import SyntheticGrant
 
@@ -28,11 +30,12 @@ GRANT = Grant(SCOPE.universe_id, SCOPE.access_subject_id, FIXTURE.source_id, FIX
 TOOL_TARGET = ToolTarget("public-target", SCOPE.universe_id, SCOPE.access_subject_id)
 TOOL_GRANT = SyntheticGrant("shell-tool-grant", SCOPE.universe_id, SCOPE.access_subject_id,
                             ("public-target",), ("read", "write"))
+HUMAN_OWNER = OwnerFixture("synthetic-speaker", SCOPE.universe_id, SCOPE.access_subject_id)
 
 HTML = """<!doctype html><html lang="en"><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Companion-Mind · Local slice</title>
-<body><main><h1>Companion-Mind</h1><p>Local synthetic workspace · <a href="/continuity">Multi-topic workspace</a> · <a href="/tools">Synthetic tools</a></p>
+<body><main><h1>Companion-Mind</h1><p>Local synthetic workspace · <a href="/continuity">Multi-topic workspace</a> · <a href="/tools">Synthetic tools</a> · <a href="/human">Human decisions</a></p>
 <form id="form" autocomplete="off"><label for="message">Your message</label><br>
 <textarea id="message" rows="5" cols="64" maxlength="8000" autocomplete="off" required></textarea><br>
 <button id="submit">Send</button><button id="resume" type="button" hidden>Resume pending turn</button>
@@ -486,6 +489,91 @@ try {
 """
 
 
+HUMAN_HTML = """<!doctype html><html lang="en"><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1"><title>Local human decision</title>
+<body><main><h1>Human decision</h1><p><a href="/">Home</a> · Public synthetic task · one local step</p>
+<button id="create" type="button">Create decision request</button>
+<form id="form" autocomplete="off"><label for="message">Response: CONTINUE, HOLD, CANCEL or UNSURE</label>
+<input id="message" maxlength="64" autocomplete="off"><button id="submit">Save response</button></form>
+<button id="resume" type="button" hidden>Resume one step</button>
+<button id="cancel" type="button">Cancel request</button><button id="next" type="button" hidden>New task</button>
+<p id="status" role="status"></p><pre id="reply"></pre></main><script src="/human.js"></script></body></html>"""
+
+HUMAN_JS = """'use strict';
+const $ = id => document.getElementById(id), key = 'owned-home-v5:' + location.origin;
+let handle = null, current = null, busy = false, state = null;
+function persist(h) {
+  handle = {id:h.id,created_at:h.created_at,expires_at:h.expires_at};
+  localStorage.setItem(key, JSON.stringify(handle));
+}
+function controls() {
+  $('create').disabled = busy || (handle !== null && state !== 'NOT_FOUND');
+  $('submit').disabled = busy || state !== 'WAITING'; $('message').disabled = $('submit').disabled;
+  $('resume').hidden = !['RESPONSE_DURABLE','UNKNOWN'].includes(state);
+  $('resume').disabled = busy;
+  $('resume').textContent = state === 'UNKNOWN' ? 'Check request' : 'Resume one step';
+  $('cancel').disabled = busy || !current || !current.human_request || ['STOP','UNKNOWN'].includes(state);
+  $('next').hidden = !['STOP','NOT_FOUND'].includes(state); $('next').disabled = busy;
+}
+function render(r) {
+  current = r; state = r.status; $('status').textContent = r.stop_reason || r.status;
+  $('reply').textContent = r.continuation ? r.continuation.result : ''; controls();
+}
+async function call(op, fields={}) {
+  const response = await fetch('/v1/human', {method:'POST',headers:{'Content-Type':'application/json','X-Owned-Home':'1'},
+    body:JSON.stringify({contract_version:'owned-home/1',op,...fields})});
+  const data = await response.json(); if (!data.ok) throw new Error(data.error);
+  render(data.result); return data.result;
+}
+async function action(fn) {
+  if (busy) return; busy = true; controls();
+  try { await fn(); } catch (error) { current = null; state = 'UNKNOWN'; $('status').textContent = error.message; }
+  finally { $('message').value = ''; busy = false; controls(); }
+}
+function identity() {
+  const id = handle.id;
+  return {human_request_id:id,request_id:'req-'+id,trace_id:'trace-'+id,goal_id:'goal-'+id,task_id:'task-'+id,
+    session_id:id,turn_id:id,turn_no:1,universe_id:'synthetic-home',access_subject_id:'synthetic-owner',owner_id:'synthetic-speaker'};
+}
+$('create').addEventListener('click', () => action(async () => {
+  if (handle) {
+    const r = await call('human_observe',{human_request_id:handle.id});
+    if (r.status !== 'NOT_FOUND') return;
+  } else {
+    const now = new Date(); persist({id:crypto.randomUUID(),created_at:now.toISOString(),expires_at:new Date(now.getTime()+3600000).toISOString()});
+  }
+  await call('human_request',{human_request:{...identity(),created_at:handle.created_at,expires_at:handle.expires_at}});
+}));
+$('form').addEventListener('submit', e => {
+  e.preventDefault(); if (!current || state !== 'WAITING') return;
+  const text = $('message').value, fp = current.human_request.request_fingerprint;
+  return action(() => call('human_respond',{human_response:{...identity(),request_fingerprint:fp,response_id:'response-'+handle.id,text}}));
+});
+$('resume').addEventListener('click', () => action(async () => {
+  if (!handle) return;
+  if (state === 'UNKNOWN' || !current) { await call('human_observe',{human_request_id:handle.id}); return; }
+  await call('human_resume',{human_request_id:handle.id,request_fingerprint:current.human_request.request_fingerprint});
+}));
+$('cancel').addEventListener('click', () => action(async () => {
+  if (current && current.human_request) await call('human_cancel',{human_request_id:handle.id,request_fingerprint:current.human_request.request_fingerprint});
+}));
+$('next').addEventListener('click', () => {
+  if (busy || !['STOP','NOT_FOUND'].includes(state)) return;
+  localStorage.removeItem(key); handle = null; current = null; state = null;
+  $('message').value = ''; $('reply').textContent = ''; $('status').textContent = ''; controls();
+});
+addEventListener('pagehide', () => { current = null; $('message').value = ''; });
+try {
+  let saved = null; try { saved = JSON.parse(localStorage.getItem(key)); } catch (_) {}
+  const iso = s => typeof s === 'string' && /^\\d{4}-\\d\\d-\\d\\dT\\d\\d:\\d\\d:\\d\\d\\.\\d{3}Z$/.test(s) && Number.isFinite(Date.parse(s));
+  if (saved && typeof saved.id === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(saved.id)
+      && iso(saved.created_at) && iso(saved.expires_at)) {
+    persist(saved); action(() => call('human_observe',{human_request_id:handle.id}));
+  } else { localStorage.removeItem(key); controls(); }
+} catch (_) { busy = true; controls(); $('status').textContent = 'Recovery storage unavailable.'; }
+"""
+
+
 def make_server(directory, *, host="127.0.0.1", port=0):
     if host != "127.0.0.1":
         raise HomeError("LOOPBACK_ONLY")
@@ -534,12 +622,16 @@ def make_server(directory, *, host="127.0.0.1", port=0):
                 return self._send(200, TOOLS_HTML, "text/html")
             if self.path == "/tools.js":
                 return self._send(200, TOOLS_JS, "application/javascript")
+            if self.path == "/human":
+                return self._send(200, HUMAN_HTML, "text/html")
+            if self.path == "/human.js":
+                return self._send(200, HUMAN_JS, "application/javascript")
             self._send(404, encode({"ok": False, "error": "ROUTE_NOT_FOUND"}))
 
         def do_POST(self):
             if not self._origin() or self.headers.get("X-Owned-Home") != "1":
                 return self._send(403, encode({"ok": False, "error": "ORIGIN_DENIED"}))
-            if self.path not in ("/v1/turn", "/v1/tool"):
+            if self.path not in ("/v1/turn", "/v1/tool", "/v1/human"):
                 return self._send(404, encode({"ok": False, "error": "ROUTE_NOT_FOUND"}))
             try:
                 lengths = self.headers.get_all("Content-Length") or []
@@ -551,6 +643,17 @@ def make_server(directory, *, host="127.0.0.1", port=0):
                 self.connection.settimeout(3)
                 body = json.loads(self.rfile.read(length))
                 op = body.get("op")
+                if self.path == "/v1/human":
+                    if op not in {"human_request", "human_respond", "human_observe", "human_resume", "human_cancel"}:
+                        raise HomeError("OPERATION_NOT_IN_SLICE")
+                    if body.get("contract_version") != VERSION:
+                        raise HomeError("CONTRACT_VERSION_MISMATCH")
+                    operation = {k: v for k, v in body.items() if k != "contract_version"}
+                    validate_operation(operation)
+                    with OwnedHomeTestPort(directory, scope=SCOPE, human_owners=[HUMAN_OWNER],
+                                           human_now=datetime.now(timezone.utc).isoformat()) as port:
+                        result = port.execute(operation)
+                    return self._send(200, encode({"ok": True, "result": result}))
                 if self.path == "/v1/tool":
                     if op == "tool_execute":
                         exact_keys(body, ("contract_version", "op", "action"))
