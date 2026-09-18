@@ -7,14 +7,56 @@
       "html": "<main data-c1-conversation=\"synthetic-chatgpt\" data-c1-profile=\"0.1\" data-c1-vendor=\"chatgpt\" data-c1-mode=\"desktop-light-en\" data-c1-scope=\"local-synthetic-user\" data-c1-id=\"conv-01\" ><article data-c1-message=\"m-01\" data-c1-role=\"user\" data-c1-order=\"1\" data-c1-state=\"complete\" ><span data-c1-role-label=\"user\">You</span><div data-c1-content>Hello world</div></article></main>",
       "expected": {
         "count": 1,
-        "payloads": ["Hello world"],
-        "roles": ["user"],
-        "control_states": ["TERMINAL_OBSERVED"],
-        "terminals": ["complete"]
+        "payloads": [
+          "Hello world"
+        ],
+        "roles": [
+          "user"
+        ],
+        "control_states": [
+          "TERMINAL_OBSERVED"
+        ],
+        "terminals": [
+          "complete"
+        ]
       }
     },
     {
-      "html": "<main data-c1-conversation=\"synthetic-chatgpt\" data-c1-profile=\"0.1\" data-c1-vendor=\"chatgpt\" data-c1-mode=\"desktop-light-en\" data-c1-scope=\"local-synthetic-user\" data-c1-id=\"conv-01\" ><article data-c1-message=\"m-01\" data-c1-role=\"user\" data-c1-order=\"1\" data-c1-state=\"complete\" ><span data-c1-role-label=\"user\">用户</span><div data-c1-content>Hello world</div></article></main>".replace("desktop-light-en\", data-c1-scope","desktop-dark-zh\", data-c1-scope") if False else "PLACEHOLDER"
+      "html": "<main data-c1-conversation=\"synthetic-chatgpt\" data-c1-profile=\"0.1\" data-c1-vendor=\"chatgpt\" data-c1-mode=\"desktop-dark-zh\" data-c1-scope=\"local-synthetic-user\" data-c1-id=\"conv-01\" ><article data-c1-message=\"m-01\" data-c1-role=\"user\" data-c1-order=\"1\" data-c1-state=\"complete\" ><span data-c1-role-label=\"user\">用户</span><div data-c1-content>Hello world</div></article></main>",
+      "expected": {
+        "count": 1,
+        "payloads": [
+          "Hello world"
+        ],
+        "roles": [
+          "user"
+        ],
+        "control_states": [
+          "TERMINAL_OBSERVED"
+        ],
+        "terminals": [
+          "complete"
+        ]
+      }
+    },
+    {
+      "html": "<main data-c1-conversation=\"synthetic-chatgpt\" data-c1-profile=\"0.1\" data-c1-vendor=\"chatgpt\" data-c1-mode=\"desktop-compact-en\" data-c1-scope=\"local-synthetic-user\" data-c1-id=\"conv-01\" ><article data-c1-message=\"m-01\" data-c1-role=\"user\" data-c1-order=\"1\" data-c1-state=\"complete\" ><span data-c1-role-label=\"user\">You</span><div data-c1-content>Hello world</div></article></main>",
+      "expected": {
+        "count": 1,
+        "payloads": [
+          "Hello world"
+        ],
+        "roles": [
+          "user"
+        ],
+        "control_states": [
+          "TERMINAL_OBSERVED"
+        ],
+        "terminals": [
+          "complete"
+        ]
+      }
     }
-  ]
+  ],
+  "replay": "IDEMPOTENT"
 }
