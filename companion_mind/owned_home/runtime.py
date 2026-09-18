@@ -16,20 +16,32 @@ from .contracts import (VERSION, HomeError, Turn, encode, evaluate_wake, fingerp
 from .index import LexicalIndex
 from .context import ContextTurn, build_context, invalidation
 from .router import route_authorities
-from .trace import context_trace, model_trace
+from .trace import context_trace, model_trace, tool_trace
 from .model_gateway import (CapabilityRegistry, ModelTurn, ProfileRef, call_spec,
                             result_from_terminal, script_frames, spec_matches)
+from .action_control import TOOL_FAULTS, ToolActionControl
+from .tool_gateway import (ActionRequest, SkillRegistry, SyntheticToolAdapter, action_intent,
+                           exact_binding, execution_receipt)
+from .permission import POLICY, evaluate_permission
 
 FAULTS = {"AFTER_USER_DURABLE", "AFTER_PROVIDER_INTENT", "AFTER_STUB_FRAME", "BEFORE_DISPLAY"}
 JOURNAL_FAULTS = {"AFTER_PROVIDER_INTENT": "F2", "AFTER_STUB_FRAME": "F3", "BEFORE_DISPLAY": "F5"}
 
 
 class OwnedRuntime:
-    def __init__(self, directory, *, scope, fixtures=(), grants=(), fault=None, model_profiles=None):
-        if fault is not None and fault not in FAULTS:
+    def __init__(self, directory, *, scope, fixtures=(), grants=(), fault=None, model_profiles=None,
+                 skill_contracts=None, tool_grants=(), tool_targets=()):
+        if fault is not None and fault not in FAULTS | TOOL_FAULTS:
             raise HomeError("UNKNOWN_FAULT")
         self.scope, self.fixtures, self.grants = scope, tuple(fixtures), tuple(grants)
         self.models = CapabilityRegistry(model_profiles)
+        self.skills = SkillRegistry(skill_contracts)
+        self.tool_grants, self.tool_targets = tuple(tool_grants), tuple(tool_targets)
+        if len({g.grant_id for g in self.tool_grants}) != len(self.tool_grants):
+            raise HomeError("DUPLICATE_TOOL_GRANT")
+        if len({(t.universe_id, t.access_subject_id, t.target_id) for t in self.tool_targets}) != len(self.tool_targets):
+            raise HomeError("DUPLICATE_TOOL_TARGET")
+        self._tool_control = self._tool_adapter = None
         keys = [(f.universe_id, f.access_subject_id, f.source_id, f.version,
                  getattr(f, "revision", "r1")) for f in self.fixtures]
         if len(set(keys)) != len(keys):
@@ -62,6 +74,10 @@ class OwnedRuntime:
                          "authority_writes": 0}
 
     def close(self):
+        if self._tool_adapter is not None:
+            self._tool_adapter.close()
+        if self._tool_control is not None:
+            self._tool_control.close()
         self.index.close()
         self.journal.close()
 
@@ -116,6 +132,8 @@ class OwnedRuntime:
 
     def observe(self, request_id):
         users, terminals = self._lookup(request_id)
+        if users and "tool_request" in self._control(users[0]):
+            return self._observe_tool(ActionRequest(**self._control(users[0])["tool_request"]))
         if not users:
             return {"contract_version": VERSION, "request_id": request_id, "status": "NOT_FOUND",
                     "knowledge_state": "UNKNOWN", "provider_invocations": 0}
@@ -174,6 +192,8 @@ class OwnedRuntime:
             raise HomeError("RESUME_TARGET_MISSING")
         user = users[0]
         control = user["metadata"]["extensions"]["owned_home"]
+        if "tool_request" in control:
+            return self.tool_execute(ActionRequest(**control["tool_request"]), resume=True)
         turn_type = self._turn_type(control["request"])
         turn = turn_type(**control["request"], text=user["content_payload"]["text"])
         return self.submit(turn, resume=True)
@@ -500,6 +520,208 @@ class OwnedRuntime:
     def wake(self, candidate):
         return evaluate_wake(candidate, self.scope)
 
+    def _tools(self):
+        if self._tool_control is None:
+            self._tool_control = ToolActionControl(self.directory / "tool-control")
+        return self._tool_control
+
+    def _adapter(self):
+        if self._tool_adapter is None:
+            self._tool_adapter = SyntheticToolAdapter(self.directory / "synthetic-tools")
+        return self._tool_adapter
+
+    def _tool_fault(self, point):
+        if self.fault == point:
+            os._exit(86)
+
+    def skill_registry(self, skill_id=None, skill_version=None):
+        if skill_id is None:
+            return self.skills.projection()
+        skill = self.skills.lookup(skill_id, skill_version)
+        return {"status": "RESOLVED" if skill else "EXACT_SKILL_UNRESOLVED",
+                "skill": skill.projection() if skill else None, "tool_executions": 0}
+
+    def _prepare_tool(self, action, *, state="UNSEEN", expected_intent=None, expected_decision=None):
+        skill = self.skills.lookup(action.skill_id, action.skill_version)
+        target = next((t for t in self.tool_targets if (t.target_id, t.universe_id, t.access_subject_id) ==
+                       (action.target_id, action.universe_id, action.access_subject_id)), None)
+        intent = action_intent(action, skill, target)
+        context, decision = evaluate_permission(action, intent, skill, self.scope, self.tool_grants, control_state=state)
+        invalid = ((expected_intent is not None and not exact_binding(expected_intent, intent)) or
+                   (expected_decision is not None and not exact_binding(expected_decision, decision)))
+        if invalid:
+            context, decision = evaluate_permission(action, intent, skill, self.scope, self.tool_grants,
+                                                    control_state=state, invalid_binding=True)
+        return skill, target, intent, context, decision
+
+    def action_preview(self, action, *, expected_intent=None, expected_decision=None):
+        _, _, intent, context, decision = self._prepare_tool(action, expected_intent=expected_intent,
+                                                            expected_decision=expected_decision)
+        return {"contract_version": VERSION, "action_intent": intent, "permission_context": context,
+                "permission_decision": decision, "policy": {**POLICY, "fingerprint": fingerprint(POLICY)},
+                "status": decision["decision"], "tool_executions": 0, "provider_invocations": 0,
+                "authority_mutation_count": 0, "preview_only": True}
+
+    def _tool_event(self, action, actor, projection=None):
+        event = self._event(action.turn(), actor, projection)
+        control = self._control(event)
+        control.update(identity=action.identity, tool_request=action.projection(),
+                       tool_request_fingerprint=fingerprint(action.projection()))
+        event.update(provider="offline-tool", model="synthetic-tools/v1")
+        return event
+
+    def tool_execute(self, action, *, resume=False, expected_intent=None, expected_decision=None):
+        if action.scope != self.scope:
+            raise HomeError("SCOPE_DENIED")
+        if type(resume) is not bool:
+            raise HomeError("INVALID_RESUME")
+        skill, target, intent, context, decision = self._prepare_tool(
+            action, expected_intent=expected_intent, expected_decision=expected_decision)
+        control = self._tools()
+        record = control.check(intent)
+        users, terminals = self._lookup(action.request_id)
+        if users:
+            if self._control(users[0]).get("tool_request_fingerprint") != fingerprint(action.projection()):
+                raise HomeError("REQUEST_IDENTITY_CONFLICT")
+            if terminals or (record and record["state"] == "TERMINAL") or not resume:
+                return self._observe_tool(action, expected_intent=expected_intent, expected_decision=expected_decision)
+        elif resume:
+            raise HomeError("RESUME_TARGET_MISSING")
+        else:
+            events = self._session_events(action.session_id)
+            expected = max((e["sequence_no"] + 1) // 2 for e in events) + 1 if events else 1
+            completed = {self._control(e)["identity"]["request_id"] for e in events if e["actor_role"] == "assistant"}
+            if action.turn_no != expected:
+                raise HomeError("SESSION_SEQUENCE_CONFLICT")
+            if any(e["actor_role"] == "user" and self._control(e)["identity"]["request_id"] not in completed for e in events):
+                raise HomeError("PENDING_TURN_REQUIRES_RESUME")
+            self.journal.ingest("A019", self._tool_event(action, "user"))
+            self._tool_fault("TOOL_AFTER_USER_DURABLE")
+        if record is None:
+            record = control.bind(intent, decision)
+        if record["state"] == "PERMISSION_ALLOWED":
+            # Re-check current grants on explicit pre-dispatch resume. A prior
+            # decision never grants permission across revocation or input drift.
+            control.reauthorize(record, decision)
+            self._tool_fault("TOOL_AFTER_PERMISSION")
+            if not decision["execution_allowed"]:
+                control.advance(record, "TERMINAL", terminal_reason=decision["reason_code"])
+            else:
+                control.advance(record, "DISPATCH_INTENT_DURABLE")
+                self._tool_fault("TOOL_AFTER_DISPATCH_INTENT")
+                control.advance(record, "EXECUTING_OR_UNKNOWN")
+                observation = self._adapter().execute(action, skill, target, decision)
+                self._tool_fault("TOOL_AFTER_EFFECT")
+                control.advance(record, "RECEIPT_OBSERVED", observation=observation,
+                                receipt=execution_receipt(intent, decision, observation))
+                self._tool_fault("TOOL_AFTER_RECEIPT")
+                return self._finish_tool(action, record, explicit=True, executions=1)
+        return self._finish_tool(action, record, explicit=resume, executions=0)
+
+    def _finish_tool(self, action, record, *, explicit=False, executions=0):
+        control = self._tools()
+        intent, decision = record["intent"], record["permission"]
+        if record["state"] in ("DISPATCH_INTENT_DURABLE", "EXECUTING_OR_UNKNOWN"):
+            control.advance(record, "TERMINAL", receipt=execution_receipt(intent, decision),
+                            terminal_reason="UNKNOWN_NO_REDISPATCH")
+        if record["state"] == "RECEIPT_OBSERVED":
+            _, _, current_intent, _, current_decision = self._prepare_tool(action)
+            same = (current_intent == intent and current_decision == decision)
+            if intent["permission_tier"] == "P2_REVERSIBLE_WRITE" and record["observation"]["reported_outcome"] == "SUCCESS":
+                if not explicit and same:
+                    return self._tool_result(action, record, executions=0, pending="EXPLICIT_READBACK_REQUIRED")
+                readback = (self._adapter().readback(action, intent) if same else
+                            {"status": "UNAVAILABLE", "observed_fingerprint": None})
+                receipt = execution_receipt(intent, decision, record["observation"], readback)
+                if readback["status"] == "VERIFIED":
+                    control.advance(record, "READBACK_VERIFIED", receipt=receipt)
+                    self._tool_fault("TOOL_AFTER_READBACK")
+                else:
+                    control.advance(record, "TERMINAL", receipt=receipt, terminal_reason="P2_READBACK_NOT_VERIFIED")
+            else:
+                control.advance(record, "TERMINAL", terminal_reason=None)
+        if record["state"] == "READBACK_VERIFIED":
+            control.advance(record, "TERMINAL", terminal_reason=None)
+        if record["state"] == "TERMINAL":
+            self._tool_fault("TOOL_AFTER_TERMINAL_CONTROL")
+            self._publish_tool_evidence(action, record)
+            self._tool_fault("TOOL_BEFORE_DISPLAY")
+        return self._tool_result(action, record, executions=executions)
+
+    def _publish_tool_evidence(self, action, record):
+        receipt = record["receipt"]
+        outcome = receipt["outcome"] if receipt else record["permission"]["decision"]
+        evidence = {"action_id": action.action_id, "skill_ref": record["intent"]["skill_ref"],
+                    "action_fingerprint": record["intent"]["intent_fingerprint"],
+                    "permission_fingerprint": record["permission"]["decision_fingerprint"],
+                    "receipt_fingerprint": receipt["receipt_fingerprint"] if receipt else None,
+                    "outcome": outcome, "readback_status": receipt["readback"]["status"] if receipt else "NOT_DISPATCHED",
+                    "connector_class": "synthetic-tools/v1", "authority_mutation_count": 0}
+        projection = {"tool_evidence": evidence, "stop_reason": record["terminal_reason"]}
+        event = self._tool_event(action, "assistant", projection)
+        event["status"] = "complete" if outcome == "SUCCESS" else "partial" if outcome in ("PARTIAL", "UNKNOWN") else "failed"
+        event["content_payload"] = {"text": "Synthetic tool: " + outcome}
+        self.journal.ingest("A019", event)
+
+    def _observe_tool(self, action, *, expected_intent=None, expected_decision=None):
+        record = self._tools().lookup(action.action_id, self.scope.projection())
+        if record is None:
+            return {"contract_version": VERSION, **action.identity, "status": "AWAIT_EXPLICIT_RESUME",
+                    "tool_executions": 0, "provider_invocations": 0, "visible_reply": None,
+                    "terminal_count": 0, "event_count": 1, "stop_reason": "EXPLICIT_RESUME_REQUIRED"}
+        if record["state"] not in ("PERMISSION_ALLOWED", "RECEIPT_OBSERVED"):
+            self._finish_tool(action, record)
+        return self._tool_result(action, record, executions=0, expected_intent=expected_intent,
+                                 expected_decision=expected_decision)
+
+    def tool_observe(self, action_id, *, resume=False):
+        identifier(action_id)
+        users = [e for e in self._events() if e["actor_role"] == "user" and
+                 self._control(e).get("tool_request", {}).get("action_id") == action_id]
+        if not users:
+            return {"status": "NOT_FOUND", "action_id": action_id, "tool_executions": 0}
+        action = ActionRequest(**self._control(users[0])["tool_request"])
+        return self.tool_execute(action, resume=True) if resume else self._observe_tool(action)
+
+    def _tool_result(self, action, record, *, executions=0, pending=None, expected_intent=None, expected_decision=None):
+        _, _, current_intent, context, decision = self._prepare_tool(
+            action, state=record["state"], expected_intent=expected_intent, expected_decision=expected_decision)
+        if (record["permission"]["reason_code"] == "STALE_OR_INVALID_ACTION_PERMISSION_BINDING" and
+                record["permission"]["authorization_binding_fingerprint"] == decision["authorization_binding_fingerprint"]):
+            skill = self.skills.lookup(action.skill_id, action.skill_version)
+            context, decision = evaluate_permission(action, current_intent, skill, self.scope, self.tool_grants,
+                                                    control_state=record["state"], invalid_binding=True)
+        changed = (current_intent != record["intent"] or decision != record["permission"])
+        if changed and decision["execution_allowed"]:
+            skill = self.skills.lookup(action.skill_id, action.skill_version)
+            context, decision = evaluate_permission(action, current_intent, skill, self.scope, self.tool_grants,
+                                                    control_state=record["state"], invalid_binding=True)
+        receipt = record["receipt"] if not changed else None
+        users, terminals = self._lookup(action.request_id)
+        evidence = self._control(terminals[0])["projection"]["tool_evidence"] if terminals else None
+        terminal = record["state"] == "TERMINAL"
+        status = ("PERMISSION_CONTEXT_CHANGED" if changed else receipt["outcome"] if terminal and receipt else
+                  decision["decision"] if terminal else "AWAIT_EXPLICIT_RECONCILE" if record["state"] == "RECEIPT_OBSERVED" else "AWAIT_EXPLICIT_RESUME")
+        trace = tool_trace(record["intent"], decision, self._tools().projection(record), receipt)
+        result = {"contract_version": VERSION, **action.identity, **self.scope.projection(), "status": status,
+                  "action_intent": record["intent"], "permission_context": context, "permission_decision": decision,
+                  "action_control": self._tools().projection(record), "tool_receipt": receipt, "tool_trace": trace,
+                  "tool_executions": executions, "provider_invocations": 0, "automatic_redispatches": 0,
+                  "authority_mutation_count": 0, "real_external_side_effects": 0, "real_credential_reads": 0, "spend": 0,
+                  "event_count": len(users) + len(terminals), "terminal_count": len(terminals),
+                  "next_turn_no": max((e["sequence_no"] + 1) // 2 for e in self._session_events(action.session_id)) + 1,
+                  "canonical_evidence": evidence, "receipts": {"user": self.journal.ingest("A019", users[0])},
+                  "visible_reply": terminals[0]["content_payload"]["text"] if terminals and not changed else None,
+                  "stop_reason": "PERMISSION_CONTEXT_CHANGED" if changed else pending or record["terminal_reason"],
+                  "presentation_order": ["USER_DURABLE", "TOOL_CONTROL_DURABLE", "A019_TERMINAL_DURABLE", "DISPLAY"] if terminals else ["USER_DURABLE", "TOOL_CONTROL_DURABLE"]}
+        if terminals:
+            result["receipts"]["assistant"] = self.journal.ingest("A019", terminals[0])
+        if changed and record["receipt"]:
+            result["historical_receipt_fingerprint"] = record["receipt"]["receipt_fingerprint"]
+        if not changed and decision["execution_allowed"] and record["intent"]["permission_tier"] != "P0_PURE":
+            result["synthetic_target"] = self._adapter().probe(record["intent"])
+        return result
+
     def rebuild(self, source_id, version):
         decision = permission(self.scope, source_id, version, self.grants)
         if decision["decision"] != "ALLOW":
@@ -512,4 +734,6 @@ class OwnedRuntime:
         # No bodies, raw metadata, filesystem locators or internal DB contents.
         return [{"event_id": e["event_id"], "actor_role": e["actor_role"], "status": e["status"],
                  "sequence_no": e["sequence_no"], "request_id": e["metadata"]["extensions"]["owned_home"]["identity"]["request_id"],
-                 "receipt": self.journal.ingest("A019", e)} for e in self._events()]
+                 "receipt": self.journal.ingest("A019", e),
+                 **({"tool_evidence": self._control(e)["projection"]["tool_evidence"]}
+                    if self._control(e).get("projection", {}).get("tool_evidence") else {})} for e in self._events()]

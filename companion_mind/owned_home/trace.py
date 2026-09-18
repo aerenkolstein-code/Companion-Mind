@@ -2,6 +2,26 @@
 from .contracts import fingerprint
 
 
+def tool_trace(intent, decision, control, receipt):
+    value = {"trace_version": "tool-trace/1", "skill_ref": intent["skill_ref"],
+             "skill_fingerprint": intent["skill_fingerprint"], "action_id": intent["action_id"],
+             "action_fingerprint": intent["intent_fingerprint"], "permission_tier": intent["permission_tier"],
+             "side_effect_class": intent["side_effect_class"], "scope": intent["scope"],
+             "grant_ref": decision["grant_ref"], "permission_decision": decision["decision"],
+             "permission_reason": decision["reason_code"], "permission_fingerprint": decision["decision_fingerprint"],
+             "policy_version": decision["policy_version"], "policy_fingerprint": decision["policy_fingerprint"],
+             "dispatch_state": control["state"], "milestones": control["milestones"],
+             "readback_status": receipt["readback"]["status"] if receipt else "NOT_DISPATCHED",
+             "receipt_fingerprint": receipt["receipt_fingerprint"] if receipt else None,
+             "terminal_outcome": receipt["outcome"] if receipt and control["state"] == "TERMINAL" else None,
+             "retry_decision": "NO_AUTOMATIC_REDISPATCH", "automatic_redispatches": 0,
+             "execution_count": receipt["execution_count"] if receipt else 0,
+             "execution_upper_bound": receipt["execution_upper_bound"] if receipt else 0,
+             "authority_mutation_count": 0, "real_credential_reads": 0, "real_external_side_effects": 0,
+             "authority": False}
+    return {**value, "trace_fingerprint": fingerprint(value)}
+
+
 def context_trace(turn, router, context):
     result = {"trace_version": "context-trace/2", "authority": False,
               "active_topic": turn.topic_id, "session_id": turn.session_id,

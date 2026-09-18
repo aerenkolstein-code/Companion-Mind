@@ -18,16 +18,21 @@ from .runtime import OwnedRuntime
 from .context import ContextTurn
 from .model_gateway import ModelTurn
 from .testport import validate_operation
+from .tool_gateway import ActionRequest, ToolTarget
+from .permission import SyntheticGrant
 
 SCOPE = Scope("synthetic-home", "synthetic-owner")
 FIXTURE = AuthorityFixture("local-demo", "v1", SCOPE.universe_id, SCOPE.access_subject_id,
                            "The local synthetic archive contains one evidence item.")
 GRANT = Grant(SCOPE.universe_id, SCOPE.access_subject_id, FIXTURE.source_id, FIXTURE.version)
+TOOL_TARGET = ToolTarget("public-target", SCOPE.universe_id, SCOPE.access_subject_id)
+TOOL_GRANT = SyntheticGrant("shell-tool-grant", SCOPE.universe_id, SCOPE.access_subject_id,
+                            ("public-target",), ("read", "write"))
 
 HTML = """<!doctype html><html lang="en"><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Companion-Mind · Local slice</title>
-<body><main><h1>Companion-Mind</h1><p>Local synthetic workspace · <a href="/continuity">Multi-topic workspace</a></p>
+<body><main><h1>Companion-Mind</h1><p>Local synthetic workspace · <a href="/continuity">Multi-topic workspace</a> · <a href="/tools">Synthetic tools</a></p>
 <form id="form" autocomplete="off"><label for="message">Your message</label><br>
 <textarea id="message" rows="5" cols="64" maxlength="8000" autocomplete="off" required></textarea><br>
 <button id="submit">Send</button><button id="resume" type="button" hidden>Resume pending turn</button>
@@ -366,6 +371,121 @@ try {
 """
 
 
+TOOLS_HTML = """<!doctype html><html lang="en"><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Companion-Mind · Synthetic tools</title><body><main>
+<h1>Synthetic tool workspace</h1><p>Local demo · <a href="/models">Model workspace</a></p>
+<label for="skill">Skill</label><select id="skill">
+<option value="synthetic.compute">P0 · Add numbers</option>
+<option value="synthetic.scoped_read">P1 · Read demo resource</option>
+<option value="synthetic.reversible_write">P2 · Write demo number</option>
+<option value="synthetic.consequential_send">P3 · Consequential action (held)</option>
+<option value="synthetic.critical">P4 · Critical action (held)</option></select>
+<button id="apply-skill" type="button">Select for next action</button>
+<p id="active-skill"></p><form id="form" autocomplete="off">
+<label for="message">Numbers: comma-separated for P0; one integer for P2</label><br>
+<textarea id="message" rows="2" maxlength="256" autocomplete="off"></textarea><br>
+<button id="submit">Run synthetic action</button>
+<button id="resume" type="button" hidden>Check / explicitly resume</button>
+<button id="next" type="button" hidden>New action</button></form>
+<p id="status" role="status"></p><pre id="reply"></pre><pre id="tool-info"></pre>
+</main><script src="/tools.js"></script></body></html>"""
+
+TOOLS_JS = """'use strict';
+const $ = id => document.getElementById(id);
+const key = 'owned-home-v4:' + location.origin;
+const skills = ['synthetic.compute','synthetic.scoped_read','synthetic.reversible_write','synthetic.consequential_send','synthetic.critical'];
+const uuid = s => typeof s === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s);
+let control, busy = false, state = null, resolved = false;
+function persist() { localStorage.setItem(key, JSON.stringify(control)); }
+function controls() {
+  const pending = control.action_id && !resolved && state !== 'NOT_FOUND';
+  $('submit').disabled = busy || pending || resolved;
+  $('apply-skill').disabled = busy || !!control.action_id;
+  $('resume').hidden = !pending; $('resume').disabled = busy;
+  $('next').hidden = !resolved; $('next').disabled = busy;
+  $('active-skill').textContent = control.skill_id + ' / ' + control.skill_version;
+}
+function render(r) {
+  state = r.status; resolved = r.terminal_count === 1;
+  if (Number.isInteger(r.next_turn_no) && r.next_turn_no > control.turn_no) control.turn_no = r.next_turn_no;
+  $('status').textContent = r.stop_reason || state;
+  $('reply').textContent = r.visible_reply || '';
+  $('tool-info').textContent = r.tool_trace ? JSON.stringify(r.tool_trace) : '';
+  persist(); controls();
+}
+async function call(body) {
+  const response = await fetch('/v1/tool', {method:'POST',headers:{'Content-Type':'application/json','X-Owned-Home':'1'},body:JSON.stringify(body)});
+  const data = await response.json(); if (!data.ok) throw new Error(data.error);
+  render(data.result); return data.result;
+}
+$('form').addEventListener('submit', async e => {
+  e.preventDefault(); if (busy || $('submit').disabled) return;
+  const text = $('message').value; $('message').value = '';
+  busy = true; controls();
+  try {
+    if (control.action_id) {
+      const observed = await call({contract_version:'owned-home/1',op:'tool_observe',action_id:control.action_id});
+      if (observed.status !== 'NOT_FOUND') return;
+    }
+    let parameters = {};
+    if (['synthetic.compute','synthetic.reversible_write'].includes(control.skill_id)) {
+      if (!/^-?\\d+(\\s*,\\s*-?\\d+)*$/.test(text.trim())) throw new Error('Enter integers only.');
+      const values = text.split(',').map(Number);
+      if (values.some(v => !Number.isInteger(v) || Math.abs(v) > 1000000)) throw new Error('Number outside demo range.');
+      if (control.skill_id === 'synthetic.compute') parameters = {values:values};
+      else { if (values.length !== 1) throw new Error('Enter one number.'); parameters = {value:values[0]}; }
+    }
+    if (control.skill_id === 'synthetic.critical') parameters = {operation:'critical'};
+    if (!control.action_id) { control.action_id = crypto.randomUUID(); persist(); }
+    const action = {action_id:control.action_id,idempotency_key:control.action_id,
+      task_id:'tool-task-' + control.session_id,request_id:control.action_id,session_id:control.session_id,
+      turn_id:control.action_id,turn_no:control.turn_no,universe_id:'synthetic-home',access_subject_id:'synthetic-owner',
+      skill_id:control.skill_id,skill_version:control.skill_version,target_id:control.target_id,
+      parameters:parameters,grant_id:control.skill_id === 'synthetic.compute' ? null : 'shell-tool-grant',
+      observed_at:new Date().toISOString()};
+    await call({contract_version:'owned-home/1',op:'tool_execute',action:action});
+  } catch (e) { state = 'TRANSPORT_UNCERTAIN'; $('status').textContent = e.message; }
+  finally { $('message').value = ''; busy = false; controls(); }
+});
+$('apply-skill').addEventListener('click', () => {
+  if (busy || control.action_id || !skills.includes($('skill').value)) return;
+  control.skill_id = $('skill').value; persist(); controls();
+});
+$('next').addEventListener('click', () => {
+  if (busy || !resolved) return;
+  control.action_id = null; resolved = false; state = null;
+  $('message').value = ''; $('reply').textContent = ''; $('tool-info').textContent = '';
+  persist(); controls();
+});
+$('resume').addEventListener('click', async () => {
+  if (busy || !control.action_id || resolved) return;
+  const op = ['AWAIT_EXPLICIT_RESUME','AWAIT_EXPLICIT_RECONCILE'].includes(state) ? 'tool_resume' : 'tool_observe';
+  busy = true; controls();
+  try { await call({contract_version:'owned-home/1',op:op,action_id:control.action_id}); }
+  catch (e) { state = 'TRANSPORT_UNCERTAIN'; $('status').textContent = e.message; }
+  finally { busy = false; controls(); }
+});
+addEventListener('pagehide', () => { $('message').value = ''; });
+try {
+  let saved = null; try { saved = JSON.parse(localStorage.getItem(key)); } catch (_) {}
+  const valid = saved && uuid(saved.session_id) && (saved.action_id === null || uuid(saved.action_id)) &&
+    Number.isInteger(saved.turn_no) && saved.turn_no >= 1 && saved.turn_no <= 1000000 &&
+    skills.includes(saved.skill_id) && saved.skill_version === 'v1' && saved.target_id === 'public-target';
+  control = valid ? {session_id:saved.session_id,action_id:saved.action_id,turn_no:saved.turn_no,
+    skill_id:saved.skill_id,skill_version:saved.skill_version,target_id:saved.target_id} :
+    {session_id:crypto.randomUUID(),action_id:null,turn_no:1,skill_id:'synthetic.compute',skill_version:'v1',target_id:'public-target'};
+  persist(); $('skill').value = control.skill_id; controls();
+  if (control.action_id) {
+    busy = true; controls();
+    call({contract_version:'owned-home/1',op:'tool_observe',action_id:control.action_id})
+      .catch(e => { state = 'TRANSPORT_UNCERTAIN'; $('status').textContent = e.message; })
+      .finally(() => { busy = false; controls(); });
+  }
+} catch (_) { busy = true; $('submit').disabled = true; $('apply-skill').disabled = true; $('status').textContent = 'Recovery storage unavailable.'; }
+"""
+
+
 def make_server(directory, *, host="127.0.0.1", port=0):
     if host != "127.0.0.1":
         raise HomeError("LOOPBACK_ONLY")
@@ -410,12 +530,16 @@ def make_server(directory, *, host="127.0.0.1", port=0):
                 return self._send(200, MODELS_HTML, "text/html")
             if self.path == "/models.js":
                 return self._send(200, MODELS_JS, "application/javascript")
+            if self.path == "/tools":
+                return self._send(200, TOOLS_HTML, "text/html")
+            if self.path == "/tools.js":
+                return self._send(200, TOOLS_JS, "application/javascript")
             self._send(404, encode({"ok": False, "error": "ROUTE_NOT_FOUND"}))
 
         def do_POST(self):
             if not self._origin() or self.headers.get("X-Owned-Home") != "1":
                 return self._send(403, encode({"ok": False, "error": "ORIGIN_DENIED"}))
-            if self.path != "/v1/turn":
+            if self.path not in ("/v1/turn", "/v1/tool"):
                 return self._send(404, encode({"ok": False, "error": "ROUTE_NOT_FOUND"}))
             try:
                 lengths = self.headers.get_all("Content-Length") or []
@@ -427,6 +551,20 @@ def make_server(directory, *, host="127.0.0.1", port=0):
                 self.connection.settimeout(3)
                 body = json.loads(self.rfile.read(length))
                 op = body.get("op")
+                if self.path == "/v1/tool":
+                    if op == "tool_execute":
+                        exact_keys(body, ("contract_version", "op", "action"))
+                    elif op in {"tool_observe", "tool_resume"}:
+                        exact_keys(body, ("contract_version", "op", "action_id"))
+                    else:
+                        raise HomeError("OPERATION_NOT_IN_SLICE")
+                    if body["contract_version"] != VERSION:
+                        raise HomeError("CONTRACT_VERSION_MISMATCH")
+                    validate_operation({k: v for k, v in body.items() if k != "contract_version"})
+                    with OwnedRuntime(directory, scope=SCOPE, tool_targets=[TOOL_TARGET], tool_grants=[TOOL_GRANT]) as runtime:
+                        result = (runtime.tool_execute(ActionRequest(**body["action"])) if op == "tool_execute" else
+                                  runtime.tool_observe(body["action_id"], resume=op == "tool_resume"))
+                    return self._send(200, encode({"ok": True, "result": result}))
                 if op in {"turn", "context_turn", "topic_switch", "model_turn"}:
                     exact_keys(body, ("contract_version", "op", "turn"), ("resume",))
                 elif op in {"observe", "resume"}:

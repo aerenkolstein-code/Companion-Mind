@@ -516,13 +516,13 @@ class Slice1Conformance(unittest.TestCase):
         self.assertGreaterEqual(sys.version_info, (3, 11))
         with sqlite3.connect(":memory:") as probe:
             probe.execute("CREATE VIRTUAL TABLE probe USING fts5(body)")
-        # WO-A1-A029-P2S3-01 section 3.2: repository preflight only.
-        # Fresh base 0bb16b98/tree31bc1f2e; router and TS2 remain protected too.
+        # WO-A1-A029-P2S4-01 section 4.2: repository preflight only.
+        # Fresh base 6a4798ad/treedff89b76; Context/Model Gateway and TS3 protected.
         allowed = {"companion_mind/owned_home/" + name + ".py" for name in
-                   ("runtime", "shell", "testport", "context", "model_gateway", "trace")}
+                   ("runtime", "shell", "testport", "trace", "tool_gateway", "permission", "action_control")}
         allowed.add("tests/test_owned_home_slice1_conformance.py")
         def permitted(path):
-            return path in allowed or (path.startswith("tests/test_owned_home_slice3_") and path.endswith(".py"))
+            return path in allowed or path == "tests/test_owned_home_slice4_conformance.py"
         changed = set(git("diff", "--name-only", "HEAD").splitlines()) | set(git("ls-files", "--others", "--exclude-standard").splitlines())
         self.assertTrue(all(permitted(p) for p in changed), changed)
         # Shallow CI need not contain the parent commit object. Reconstruct the
@@ -536,10 +536,11 @@ class Slice1Conformance(unittest.TestCase):
             subprocess.run(["git", "update-index", "--force-remove", "--", *added_surface],
                            cwd=ROOT, env=env, check=True)
             reconstructed = subprocess.check_output(["git", "write-tree"], cwd=ROOT, env=env, text=True).strip()
-            self.assertEqual(reconstructed, "1290694b4dda4e13e0a8ed8c5249040ec4289cd3")
+            self.assertEqual(reconstructed, "2d0ec0d73a703a1abb4024abda4f1aa6f4c43cfd")
         for name in sorted(allowed - {"tests/test_owned_home_slice1_conformance.py"} |
                            {"companion_mind/owned_home/contracts.py", "companion_mind/owned_home/index.py",
-                            "companion_mind/owned_home/router.py"}):
+                            "companion_mind/owned_home/router.py", "companion_mind/owned_home/context.py",
+                            "companion_mind/owned_home/model_gateway.py"}):
             source = (ROOT / name).read_text()
             tree = ast.parse(source)
             if not name.endswith(("shell.py", "index.py")):
