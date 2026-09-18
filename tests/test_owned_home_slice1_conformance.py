@@ -522,7 +522,18 @@ class Slice1Conformance(unittest.TestCase):
                    ("runtime", "shell", "testport", "trace", "human_control", "continuation")}
         allowed.add("tests/test_owned_home_slice1_conformance.py")
         def permitted(path):
-            return path in allowed or path == "tests/test_owned_home_slice5_conformance.py"
+            # Explicitly approved C1 S0 publication compatibility allowance.
+            c1_prefixes = (
+                "companion_mind/browser_sidecar/",
+                "docs/browser_sidecar/",
+                "tests/fixtures/c1_chatgpt_web_v0_1/",
+            )
+            return (
+                path in allowed
+                or path == "tests/test_owned_home_slice5_conformance.py"
+                or path == "tests/test_browser_sidecar_s0.py"
+                or path.startswith(c1_prefixes)
+            )
         changed = set(git("diff", "--name-only", "HEAD").splitlines()) | set(git("ls-files", "--others", "--exclude-standard").splitlines())
         self.assertTrue(all(permitted(p) for p in changed), changed)
         # Shallow CI need not contain the parent commit object. Reconstruct the

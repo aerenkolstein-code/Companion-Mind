@@ -1,0 +1,12 @@
+{
+  "fixture_id": "F20",
+  "purpose": "Contract mismatch fails closed",
+  "origin": "hand-authored synthetic / public-safe / no real conversation",
+  "snapshots": [
+    {
+      "html": "<main data-c1-conversation=\"synthetic-chatgpt\" data-c1-profile=\"0.1\" data-c1-vendor=\"chatgpt\" data-c1-mode=\"desktop-light-en\" data-c1-scope=\"local-synthetic-user\" data-c1-id=\"conv-01\" ><article data-c1-message=\"m-01\" data-c1-role=\"user\" data-c1-order=\"1\" data-c1-state=\"complete\" ><span data-c1-role-label=\"user\">You</span><div data-c1-content>Hello world</div></article></main>",
+      "contract_version": "canonical_event/v2",
+      "error": "CONTRACT_CHANGE_REQUIRED"
+    }
+  ]
+}

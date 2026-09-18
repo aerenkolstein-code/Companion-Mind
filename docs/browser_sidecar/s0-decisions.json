@@ -1,0 +1,19 @@
+{
+  "work_order": "ENG-C1-A018-S0-01",
+  "implemented_stage": "S0",
+  "packaging": "SELECT_B",
+  "staging_medium": "local SQLite recovery buffer",
+  "staging_is_authority": false,
+  "browser_sync": false,
+  "candidate_T_stable_ms": 500,
+  "calibration_id": "CAL-S0-01",
+  "claims": {
+    "independent_g0_acceptance": false,
+    "real_dom_verified": false,
+    "user_before_provider": false,
+    "technical_mainline_complete": false,
+    "w1": false,
+    "windows_live_verified": false,
+    "staging_implemented": false
+  }
+}

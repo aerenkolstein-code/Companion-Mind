@@ -1,0 +1,28 @@
+{
+  "fixture_id": "F07",
+  "purpose": "Attachment reference only, no file or URL copy",
+  "origin": "hand-authored synthetic / public-safe / no real conversation",
+  "snapshots": [
+    {
+      "html": "<main data-c1-conversation=\"synthetic-chatgpt\" data-c1-profile=\"0.1\" data-c1-vendor=\"chatgpt\" data-c1-mode=\"desktop-light-en\" data-c1-scope=\"local-synthetic-user\" data-c1-id=\"conv-01\" ><article data-c1-message=\"m-01\" data-c1-role=\"user\" data-c1-order=\"1\" data-c1-state=\"complete\" ><span data-c1-role-label=\"user\">You</span><div data-c1-content>Hello world</div><a data-c1-attachment=\"att-01\" data-c1-filename=\"synthetic.csv\" data-c1-media-type=\"text/csv\" href=\"https://example.invalid/public-fixture.csv\">synthetic.csv</a></article></main>",
+      "expected": {
+        "count": 1,
+        "payloads": [
+          "Hello world"
+        ],
+        "roles": [
+          "user"
+        ],
+        "control_states": [
+          "TERMINAL_OBSERVED"
+        ],
+        "terminals": [
+          "complete"
+        ],
+        "attachment_statuses": [
+          "REFERENCE_ONLY"
+        ]
+      }
+    }
+  ]
+}

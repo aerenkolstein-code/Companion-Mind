@@ -1,0 +1,254 @@
+[
+  {
+    "proof_id": "P01",
+    "obligation": "No second Authority",
+    "current_stage_owner": "S0 developer checks / separate Board G0 acceptance",
+    "s0_executable_tests": [
+      "test_g0_19_a019_unavailable_never_false_commit",
+      "test_g0_24_forbidden_call_and_dependency_scan"
+    ],
+    "positive_test": "source-local output declares authority=false",
+    "negative_test": "parser must not call ingest or persistence",
+    "current_evaluability": "S0 boundary only; S2/S3 required",
+    "later_test_ids": [
+      "S2/T14",
+      "T15"
+    ],
+    "future_live_dependency": "No browser dependency for S0; S7 must confirm actual output route"
+  },
+  {
+    "proof_id": "P02",
+    "obligation": "Canonical output only through A019",
+    "current_stage_owner": "S0 developer checks / separate Board G0 acceptance",
+    "s0_executable_tests": [
+      "test_g0_02_contract_version_hashes_and_offline_seam",
+      "test_g0_19_a019_unavailable_never_false_commit"
+    ],
+    "positive_test": "existing published A018 fixture ingests offline",
+    "negative_test": "wrong adapter rejected; static parser never commits",
+    "current_evaluability": "Offline existing seam only; no C1 mapper",
+    "later_test_ids": [
+      "S3/T13"
+    ],
+    "future_live_dependency": "L1/L9 exact A019 receipts"
+  },
+  {
+    "proof_id": "P03",
+    "obligation": "browser_sidecar/observed provenance",
+    "current_stage_owner": "S0 developer checks / separate Board G0 acceptance",
+    "s0_executable_tests": [
+      "test_g0_02_contract_version_hashes_and_offline_seam",
+      "test_g0_26_a019_contract_owned_home_unchanged"
+    ],
+    "positive_test": "exact provenance and unchanged contract",
+    "negative_test": "A019 wrong-adapter masquerade rejected",
+    "current_evaluability": "Offline seam/pins; future mapping required",
+    "later_test_ids": [
+      "S3/T13",
+      "T17"
+    ],
+    "future_live_dependency": "Live provenance/readback in S7"
+  },
+  {
+    "proof_id": "P04",
+    "obligation": "No USER-before-provider claim",
+    "current_stage_owner": "S0 developer checks / separate Board G0 acceptance",
+    "s0_executable_tests": [
+      "test_g0_19_a019_unavailable_never_false_commit",
+      "test_g0_22_adrs_and_synthetic_calibration"
+    ],
+    "positive_test": "source-local NOT_ATTEMPTED and claim flags false",
+    "negative_test": "no commit or hard-gate claim in parser output",
+    "current_evaluability": "Static observer ceiling only",
+    "later_test_ids": [
+      "S4/T11",
+      "S8/CLAIMS"
+    ],
+    "future_live_dependency": "Live timing cannot establish control of provider dispatch"
+  },
+  {
+    "proof_id": "P05",
+    "obligation": "Complete/partial/failed evidence",
+    "current_stage_owner": "S0 developer checks / separate Board G0 acceptance",
+    "s0_executable_tests": [
+      "test_g0_06_normalized_visible_payload_and_terminal_evidence",
+      "test_g0_22_adrs_and_synthetic_calibration"
+    ],
+    "positive_test": "F02-F05 and 500ms synthetic candidate",
+    "negative_test": "missing/early/UNKNOWN/contradictory terminal rejected or held",
+    "current_evaluability": "Static fixture terminal candidates only",
+    "later_test_ids": [
+      "S4/T11"
+    ],
+    "future_live_dependency": "L6/L7 later; failed may be NOT_EVALUABLE"
+  },
+  {
+    "proof_id": "P06",
+    "obligation": "Reload/virtualization identity",
+    "current_stage_owner": "S0 developer checks / separate Board G0 acceptance",
+    "s0_executable_tests": [
+      "test_g0_08_virtualization_dedupe",
+      "test_g0_09_reload_fixture_stability",
+      "test_g0_12_same_id_different_fingerprint_conflict"
+    ],
+    "positive_test": "F08/F09 same source identity",
+    "negative_test": "conflicting rebuilt node or position rejected",
+    "current_evaluability": "Pure static snapshots; no restart runtime",
+    "later_test_ids": [
+      "S1/T05",
+      "T06",
+      "T07"
+    ],
+    "future_live_dependency": "L2/L3/L5 on real UI"
+  },
+  {
+    "proof_id": "P07",
+    "obligation": "Duplicate tab no amplification",
+    "current_stage_owner": "S0 developer checks / separate Board G0 acceptance",
+    "s0_executable_tests": [
+      "test_g0_10_duplicate_tab_fixture_stability",
+      "test_g0_27_100_repeated_parse_replay_cycles"
+    ],
+    "positive_test": "F10 replay collapses identical captures",
+    "negative_test": "cross-account scopes not merged",
+    "current_evaluability": "Static duplicate-tab observations; no concurrent processes",
+    "later_test_ids": [
+      "S1/T08",
+      "S4/T20"
+    ],
+    "future_live_dependency": "L4 concurrency later"
+  },
+  {
+    "proof_id": "P08",
+    "obligation": "Staging crash recovery no false commit",
+    "current_stage_owner": "S0 developer checks / separate Board G0 acceptance",
+    "s0_executable_tests": [
+      "test_g0_19_a019_unavailable_never_false_commit",
+      "test_g0_22_adrs_and_synthetic_calibration",
+      "test_g0_24_forbidden_call_and_dependency_scan"
+    ],
+    "positive_test": "parser outputs NOT_ATTEMPTED; ADR stages non-Authority",
+    "negative_test": "A019 call blocked; absent receipt cannot be forged by parser",
+    "current_evaluability": "Guard/ADR only; staging engine NOT_IMPLEMENTED",
+    "later_test_ids": [
+      "S2/T09"
+    ],
+    "future_live_dependency": "S7 reconnect/reopen plus S2 fault injection"
+  },
+  {
+    "proof_id": "P09",
+    "obligation": "Safe attachment provenance",
+    "current_stage_owner": "S0 developer checks / separate Board G0 acceptance",
+    "s0_executable_tests": [
+      "test_g0_07_attachment_reference",
+      "test_g0_14_secret_scrub_before_persistable_output"
+    ],
+    "positive_test": "safe name/type/message association retained",
+    "negative_test": "F18 signed/missing URL omitted and UNAVAILABLE",
+    "current_evaluability": "Reference-only static behavior",
+    "later_test_ids": [
+      "S3/T12"
+    ],
+    "future_live_dependency": "L8 public-safe attachment, no binary completeness claim"
+  },
+  {
+    "proof_id": "P10",
+    "obligation": "Secret before durable persistence",
+    "current_stage_owner": "S0 developer checks / separate Board G0 acceptance",
+    "s0_executable_tests": [
+      "test_g0_14_secret_scrub_before_persistable_output",
+      "test_g0_24_forbidden_call_and_dependency_scan"
+    ],
+    "positive_test": "F14 redacted before test materialization",
+    "negative_test": "split-markup sentinel and unsafe identity cannot leak",
+    "current_evaluability": "Declared patterns only; future staging boundary still required",
+    "later_test_ids": [
+      "S2/T10"
+    ],
+    "future_live_dependency": "S7 synthetic sentinel/permission boundary"
+  },
+  {
+    "proof_id": "P11",
+    "obligation": "Vendor drift fail closed",
+    "current_stage_owner": "S0 developer checks / separate Board G0 acceptance",
+    "s0_executable_tests": [
+      "test_g0_16_profile_drift_fail_closed",
+      "test_g0_18_unsupported_modes"
+    ],
+    "positive_test": "frozen profile and supported F17 modes parse",
+    "negative_test": "unknown/rehashed profile or partial selector drift rejected",
+    "current_evaluability": "Synthetic contract only; real selectors NOT_VERIFIED",
+    "later_test_ids": [
+      "S4/T16"
+    ],
+    "future_live_dependency": "S6/S7 real profile calibration"
+  },
+  {
+    "proof_id": "P12",
+    "obligation": "C1/C2 controller and provenance separation",
+    "current_stage_owner": "S0 developer checks / separate Board G0 acceptance",
+    "s0_executable_tests": [
+      "test_g0_02_contract_version_hashes_and_offline_seam",
+      "test_g0_24_forbidden_call_and_dependency_scan",
+      "test_g0_25_c2_unchanged"
+    ],
+    "positive_test": "C2 inventory/digests unchanged",
+    "negative_test": "wrong provenance and forbidden runtime imports rejected",
+    "current_evaluability": "S0 boundary only; no live controller",
+    "later_test_ids": [
+      "S3/T17",
+      "S4/T18"
+    ],
+    "future_live_dependency": "S7 excludes bulk history/private endpoints"
+  },
+  {
+    "proof_id": "P13",
+    "obligation": "A019 conflict/receipt visible",
+    "current_stage_owner": "S0 developer checks / separate Board G0 acceptance",
+    "s0_executable_tests": [
+      "test_g0_02_contract_version_hashes_and_offline_seam",
+      "test_g0_12_same_id_different_fingerprint_conflict",
+      "test_g0_19_a019_unavailable_never_false_commit"
+    ],
+    "positive_test": "published offline seam returns durable/duplicate dispositions",
+    "negative_test": "same source identity changed payload fails; no fake receipt",
+    "current_evaluability": "Static conflict + existing seam; no C1 runtime receipt handling",
+    "later_test_ids": [
+      "S3/T13"
+    ],
+    "future_live_dependency": "S7 loss/retry/conflict observations"
+  },
+  {
+    "proof_id": "P14",
+    "obligation": "Drive replica owned by A019",
+    "current_stage_owner": "S0 developer checks / separate Board G0 acceptance",
+    "s0_executable_tests": [
+      "test_g0_19_a019_unavailable_never_false_commit",
+      "test_g0_24_forbidden_call_and_dependency_scan",
+      "test_g0_26_a019_contract_owned_home_unchanged"
+    ],
+    "positive_test": "new parser has no writer; A019 unchanged",
+    "negative_test": "forbidden imports/calls fail source scan",
+    "current_evaluability": "Static absence of direct writer; runtime integration deferred",
+    "later_test_ids": [
+      "S3/T14"
+    ],
+    "future_live_dependency": "S7 exact A019 replica receipt if in authorized scope"
+  },
+  {
+    "proof_id": "P15",
+    "obligation": "Technical gate distinct from W1",
+    "current_stage_owner": "S0 developer checks / separate Board G0 acceptance",
+    "s0_executable_tests": [
+      "test_g0_22_adrs_and_synthetic_calibration"
+    ],
+    "positive_test": "claim flags remain false and stage=S0",
+    "negative_test": "no independent G0/mainline/W1 claim accepted",
+    "current_evaluability": "S0 claim guard only",
+    "later_test_ids": [
+      "S8/FINAL-TECHNICAL-GATE",
+      "W1/PRODUCT-RETIREMENT"
+    ],
+    "future_live_dependency": "Separate acceptance; 20-turn evidence never grants work authority"
+  }
+]

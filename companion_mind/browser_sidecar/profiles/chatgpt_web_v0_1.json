@@ -1,0 +1,85 @@
+{
+  "profile_id": "ChatGPT-Web-v0.1",
+  "profile_version": "0.1",
+  "vendor_family": "ChatGPT Official Web",
+  "supported_surface": "synthetic static DOM / Desktop Chromium-family / single-user / user-controlled conversation",
+  "production_selector_validity": "NOT_VERIFIED",
+  "conversation_root": {
+    "attribute": "data-c1-conversation",
+    "value": "synthetic-chatgpt"
+  },
+  "user_message": {
+    "tag": "article",
+    "role_attribute": "data-c1-role",
+    "role_value": "user"
+  },
+  "assistant_message": {
+    "tag": "article",
+    "role_attribute": "data-c1-role",
+    "role_value": "assistant"
+  },
+  "visible_role": {
+    "attribute": "data-c1-role-label",
+    "match": "exactly one visible label agrees with role attribute; no prose inference"
+  },
+  "message_identity": {
+    "attribute": "data-c1-message",
+    "strategy": "scope alias + stable/temporary conversation identity + stable message ID; missing/ambiguous fails closed"
+  },
+  "streaming_marker": {
+    "attribute": "data-c1-streaming",
+    "value": "true",
+    "canonical_status": null
+  },
+  "terminal_evidence": {
+    "attribute": "data-c1-terminal",
+    "allowed": [
+      "complete",
+      "partial",
+      "failed"
+    ],
+    "stability_attribute": "data-c1-stable-ms",
+    "candidate_T_stable_ms": 500,
+    "calibration_id": "CAL-S0-01",
+    "claim": "fixture-supplied observation only, no live clock or controller"
+  },
+  "attachment_reference": {
+    "attribute": "data-c1-attachment",
+    "source": "message association",
+    "url_policy": "never retain URLs; signed/missing references UNAVAILABLE"
+  },
+  "drift_sanity_checks": [
+    "one visible conversation root",
+    "exact profile/version/vendor/mode",
+    "no ambiguous role",
+    "one content body",
+    "no nested message",
+    "unique source position",
+    "stable identity",
+    "explicit terminal evidence",
+    "hidden/inert/aria-hidden/inline-style-hidden/script/template noise excluded"
+  ],
+  "supported_modes": [
+    "desktop-light-en",
+    "desktop-dark-zh",
+    "desktop-compact-en"
+  ],
+  "unsupported_modes": [
+    "mobile",
+    "grok",
+    "gemini",
+    "unknown layout",
+    "private endpoint",
+    "computed CSS outside synthetic contract"
+  ],
+  "scope_alias_policy": "local opaque alias only; no account email/PII",
+  "authority": false,
+  "canonical_output_owner": "A019",
+  "adapter": "A018",
+  "provenance": [
+    "browser_sidecar",
+    "observed"
+  ],
+  "runtime_scope": "S0 static only; no persistence, network, browser or canonical mapper",
+  "profile_fingerprint": "9aeb984182bcbc8a9562eeff60c9b541fb89fcb0dbbd2fbcde6ffab727701268"
+}
