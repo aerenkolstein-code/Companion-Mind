@@ -6,26 +6,106 @@
   "synthetic": true,
   "production_dom_verified": false,
   "fixtures": [
-    {"fixture_id": "F01", "path": "F01.json", "sha256": "0e5150a791de5be34f3195f1b55c0a064d34f30c715823820313c02955c6158b"},
-    {"fixture_id": "F02", "path": "F02.json", "sha256": "f9e2afb408b89da09cdb2c6c8de75604949230e2f8052c7abec0dafcb7740aa1"},
-    {"fixture_id": "F03", "path": "F03.json", "sha256": "ae81982fdf4f94383ba98d1dbe2a961e3da73381190b53e2b80b376b11be2d3c"},
-    {"fixture_id": "F04", "path": "F04.json", "sha256": "baddc49ca029443d1b1377037b0ee33aaff5d4b135c4ec2928e2099cb5d5663a"},
-    {"fixture_id": "F05", "path": "F05.json", "sha256": "f8bdb45cdf2c06a07509d01d9e7cc040217d783346b73fa842503ab2e9c98069"},
-    {"fixture_id": "F06", "path": "F06.json", "sha256": "04f0423c7c072db2f17e3ac1d1c9b7b40cd2b3353d1b51faac50b7df37e9ff51"},
-    {"fixture_id": "F07", "path": "F07.json", "sha256": "ae5668c149dcb2d4562a34b5f2bcb00559709d9e588c56be224b02b2ab0d865e"},
-    {"fixture_id": "F08", "path": "F08.json", "sha256": "18e793eef2cdaa7aa931f09449437241dfe372b0701b2d785d2c35ca1a68ffac"},
-    {"fixture_id": "F09", "path": "F09.json", "sha256": "6926a2c47d3e1d6ed0c7d3170807adc6b1d1d317884314e3a621f8ceacf6a65b"},
-    {"fixture_id": "F10", "path": "F10.json", "sha256": "92aac30eeba18503bdd96998cee3993ddf4636d4afe23047f41514387092d2da"},
-    {"fixture_id": "F11", "path": "F11.json", "sha256": "cd93cd90e4e03a731737f2967c703ecb2fecf7c70da53dc49d85d40227e632f4"},
-    {"fixture_id": "F12", "path": "F12.json", "sha256": "8fafe98616860dde7704f47dcc02a1931687e810addbce609c89b4357ec3bfb7"},
-    {"fixture_id": "F13", "path": "F13.json", "sha256": "2a502235eaf24e31cd378301a717909c6956fab34eed6bc409017d28339287d5"},
-    {"fixture_id": "F14", "path": "F14.json", "sha256": "8a3788fb29ed4dd04889332543e456f63fa11de28f71dc2d2ceaa9f3b40b9081"},
-    {"fixture_id": "F15", "path": "F15.json", "sha256": "5899c09a8ed390961c22d950608eeafcbe521460afdde393b452d30a4e13b32f"},
-    {"fixture_id": "F16", "path": "F16.json", "sha256": "2073153b4a0b60098c4c6ec265ed029f8cd6b6f937d98278cc1b401d38d08d4c"},
-    {"fixture_id": "F17", "path": "F17.json", "sha256": "4bea5bf39905758cc9dda41ea2105e4ee0302643c852885f251ad0b55cca6382"},
-    {"fixture_id": "F18", "path": "F18.json", "sha256": "ad860cf27222637b030fd82c965533ba7529bf76104962f972c52ffff075e5fe"},
-    {"fixture_id": "F19", "path": "F19.json", "sha256": "9eca4a62950f15350432fc79e771af9d293639224ac2c46a660fff5f142f1029"},
-    {"fixture_id": "F20", "path": "F20.json", "sha256": "924dcc43d95a402a9bc62e7097ff219448ea3654d44b1a412306fb79da59019d"}
+    {
+      "fixture_id": "F01",
+      "path": "F01.json",
+      "sha256": "0e5150a791de5be34f3195f1b55c0a064d34f30c715823820313c02955c6158b"
+    },
+    {
+      "fixture_id": "F02",
+      "path": "F02.json",
+      "sha256": "f9e2afb408b89da09cdb2c6c8de75604949230e2f8052c7abec0dafcb7740aa1"
+    },
+    {
+      "fixture_id": "F03",
+      "path": "F03.json",
+      "sha256": "ae81982fdf4f94383ba98d1dbe2a961e3da73381190b53e2b80b376b11be2d3c"
+    },
+    {
+      "fixture_id": "F04",
+      "path": "F04.json",
+      "sha256": "baddc49ca029443d1b1377037b0ee33aaff5d4b135c4ec2928e2099cb5d5663a"
+    },
+    {
+      "fixture_id": "F05",
+      "path": "F05.json",
+      "sha256": "f8bdb45cdf2c06a07509d01d9e7cc040217d783346b73fa842503ab2e9c98069"
+    },
+    {
+      "fixture_id": "F06",
+      "path": "F06.json",
+      "sha256": "04f0423c7c072db2f17e3ac1d1c9b7b40cd2b3353d1b51faac50b7df37e9ff51"
+    },
+    {
+      "fixture_id": "F07",
+      "path": "F07.json",
+      "sha256": "ae5668c149dcb2d4562a34b5f2bcb00559709d9e588c56be224b02b2ab0d865e"
+    },
+    {
+      "fixture_id": "F08",
+      "path": "F08.json",
+      "sha256": "18e793eef2cdaa7aa931f09449437241dfe372b0701b2d785d2c35ca1a68ffac"
+    },
+    {
+      "fixture_id": "F09",
+      "path": "F09.json",
+      "sha256": "6926a2c47d3e1d6ed0c7d3170807adc6b1d1d317884314e3a621f8ceacf6a65b"
+    },
+    {
+      "fixture_id": "F10",
+      "path": "F10.json",
+      "sha256": "92aac30eeba18503bdd96998cee3993ddf4636d4afe23047f41514387092d2da"
+    },
+    {
+      "fixture_id": "F11",
+      "path": "F11.json",
+      "sha256": "cd93cd90e4e03a731737f2967c703ecb2fecf7c70da53dc49d85d40227e632f4"
+    },
+    {
+      "fixture_id": "F12",
+      "path": "F12.json",
+      "sha256": "8fafe98616860dde7704f47dcc02a1931687e810addbce609c89b4357ec3bfb7"
+    },
+    {
+      "fixture_id": "F13",
+      "path": "F13.json",
+      "sha256": "2a502235eaf24e31cd378301a717909c6956fab34eed6bc409017d28339287d5"
+    },
+    {
+      "fixture_id": "F14",
+      "path": "F14.json",
+      "sha256": "8a3788fb29ed4dd04889332543e456f63fa11de28f71dc2d2ceaa9f3b40b9081"
+    },
+    {
+      "fixture_id": "F15",
+      "path": "F15.json",
+      "sha256": "5899c09a8ed390961c22d950608eeafcbe521460afdde393b452d30a4e13b32f"
+    },
+    {
+      "fixture_id": "F16",
+      "path": "F16.json",
+      "sha256": "2073153b4a0b60098c4c6ec265ed029f8cd6b6f937d98278cc1b401d38d08d4c"
+    },
+    {
+      "fixture_id": "F17",
+      "path": "F17.json",
+      "sha256": "4bea5bf39905758cc9dda41ea2105e4ee0302643c852885f251ad0b55cca6382"
+    },
+    {
+      "fixture_id": "F18",
+      "path": "F18.json",
+      "sha256": "ad860cf27222637b030fd82c965533ba7529bf76104962f972c52ffff075e5fe"
+    },
+    {
+      "fixture_id": "F19",
+      "path": "F19.json",
+      "sha256": "9eca4a62950f15350432fc79e771af9d293639224ac2c46a660fff5f142f1029"
+    },
+    {
+      "fixture_id": "F20",
+      "path": "F20.json",
+      "sha256": "924dcc43d95a402a9bc62e7097ff219448ea3654d44b1a412306fb79da59019d"
+    }
   ],
   "calibration": {
     "calibration_id": "CAL-S0-01",
@@ -33,8 +113,24 @@
     "margin_ms": 50,
     "candidate_T_stable_ms": 500,
     "traces": [
-      {"terminal_observed_ms": 200, "mutation_times_ms": [0, 200, 550, 1000]},
-      {"terminal_observed_ms": 100, "mutation_times_ms": [0, 100, 350, 750]}
+      {
+        "terminal_observed_ms": 200,
+        "mutation_times_ms": [
+          0,
+          200,
+          550,
+          1000
+        ]
+      },
+      {
+        "terminal_observed_ms": 100,
+        "mutation_times_ms": [
+          0,
+          100,
+          350,
+          750
+        ]
+      }
     ]
   },
   "manifest_fingerprint": "68a3903f1adb00d42357866afae8a2520832396459276734d5e4b4d5d9933b95"
