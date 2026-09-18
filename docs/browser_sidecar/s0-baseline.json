@@ -1,7 +1,7 @@
 {
-  "base_sha": "40389094886cd1f8570919459f38dc22083c0e37",
-  "base_tree": "3a0b5b5120c15504db10f41e11a0dc5997a779ee",
-  "origin": "fresh remote main verified before dedicated branch creation",
+  "base_sha": "2d597c9ff222090551fd818db55f29d4a36cdb1d",
+  "base_tree": "e475e939e4e48f2d731d7bc0265c4ab36d569a9c",
+  "origin": "fresh current main pinned for WO-ENG-C1-A018-S0-PUBFIX-01 publication revalidation",
   "readonly_patterns": [
     "companion_mind/chatgpt_recovery.py",
     "tools/chatgpt_recovery_*",
@@ -31,11 +31,11 @@
     "companion_mind/owned_home/model_gateway.py": "c3ce21bca9edab10d30d4ff93d0c85ae08c4a803c535062ef783c0d249ad7f1b",
     "companion_mind/owned_home/permission.py": "d708f92a2ef245cdb44d05a9ea03243587569493f32eb38df1e5696bee434f42",
     "companion_mind/owned_home/router.py": "ef6a51354067a4350016bfcf845380dfee592dda0e07fccfb8466528514d8cbd",
-    "companion_mind/owned_home/runtime.py": "f9ccb0712249a6032d03eaf1fcb41648197b910fc547ef5902159f049b4a0d0e",
-    "companion_mind/owned_home/shell.py": "e24d02717af29869bc80624cb5bf73cfe40f1517cbd8bd0fec4182f73449d5a7",
-    "companion_mind/owned_home/testport.py": "beac17e554e88f783d650c8f45562948f57ef6bf000a764d8b1805da38695b07",
+    "companion_mind/owned_home/runtime.py": "7a7734573f3efd5cfb003d0518cadc93db9c56a9bd7c27a873e649a20bca7040",
+    "companion_mind/owned_home/shell.py": "c5aede4ca1de0f211d829b145ae4ce57da263bdc93c13e67c4c4e60953c7163c",
+    "companion_mind/owned_home/testport.py": "f8e55a6213b25b49ddbec431e3a5a8d80e307e916751eaae73a812b6921d2fd6",
     "companion_mind/owned_home/tool_gateway.py": "b7976c9c5c37f71e80a2bfe43a35e99077efa1c4c5f49c75f39b50d15f708d18",
-    "companion_mind/owned_home/trace.py": "8262effa0d5a89c509104b07f9ef75a73c23cb9da5395d1c62c2418e7579a42c",
+    "companion_mind/owned_home/trace.py": "04b5cbd896af47e82eba6e5c4be7424d4493f524178b3f0bf922910be2f4abf2",
     "docs/c2-recovery-prototype.md": "c73d85d912639a60ab2cc91f9bdb6ade15942d344e9437b1b34ed9dfb822e7e0",
     "pyproject.toml": "350184b8d5192a07caf6daf3aaee6ca6b3caa2b5390a7e241ff1d9b03954970c",
     "schemas/canonical_event_v1.schema.json": "37c8c6df4433b9bd070be6e8b07405b9a67e15dd5c93ed54c04251f4d36c9b1e",
@@ -58,6 +58,8 @@
     "tools/chatgpt_recovery_reconcile.mjs": "74683e9420226e7cb94eaf6a332f31d74c46b6e4c7ce2a48af206124ae7cc98f",
     "tools/chatgpt_recovery_verify.html": "5469ef0f7555a4d18234c817aa27a91211fd4f29e66d0326097378050f614861",
     "tools/chatgpt_recovery_verify.mjs": "e002fd62b8648b5b8dc2cc5cadca858c362994345db4e64ff0197890f8a4d64b",
-    "tools/chatgpt_recovery_verify.py": "d7880d5a0660dabf0709f48e368828e3a27ddbd09550fbe79a2de7c18bcb7b8c"
+    "tools/chatgpt_recovery_verify.py": "d7880d5a0660dabf0709f48e368828e3a27ddbd09550fbe79a2de7c18bcb7b8c",
+    "companion_mind/owned_home/human_control.py": "7ccea260d7b6f485aa460cc572fd11c9a7f6a50dff5ded42778c56211b4b76c8",
+    "companion_mind/owned_home/continuation.py": "0495e237f6fb4d62ed97b16d976206c3d27ef0c178161082d112f3ab11edb4fb"
   }
 }
