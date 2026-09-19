@@ -42,6 +42,8 @@ from .action_control import TOOL_FAULTS
 from .tool_gateway import ActionRequest, SkillContract, ToolTarget
 from .permission import SyntheticGrant
 from .human_control import HUMAN_FAULTS, NOW, HumanRequest, HumanResponse, OwnerFixture, instant
+from .source_pack import READONLY_FAULTS, READONLY_PROFILE
+from .readonly_session import execute_readonly_request
 
 
 def validate_operation(operation):
@@ -209,6 +211,8 @@ class OwnedHomeTestPort:
 def execute(directory, request, *, fault=None):
     if not isinstance(request, dict):
         raise HomeError("INVALID_SHAPE")
+    if request.get("profile_version") == READONLY_PROFILE:
+        return execute_readonly_request(directory, request, fault=fault)
     required = ("contract_version", "scope", "op")
     optional = ("fixtures", "grants", "turn", "resume", "request_id", "candidate", "source_id", "version", "session_id",
                 "model_profiles", "profile_key", "profile_version", "spec", "expected_spec",
@@ -248,7 +252,7 @@ def execute(directory, request, *, fault=None):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--store", required=True)
-    parser.add_argument("--fault", choices=sorted(FAULTS | TOOL_FAULTS | HUMAN_FAULTS))
+    parser.add_argument("--fault", choices=sorted(FAULTS | TOOL_FAULTS | HUMAN_FAULTS | READONLY_FAULTS))
     args = parser.parse_args()
     try:
         payload = sys.stdin.buffer.read(1_048_577)

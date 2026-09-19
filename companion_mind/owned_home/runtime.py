@@ -525,6 +525,12 @@ class OwnedRuntime:
             result["projection"]["trace"]["trace_fingerprint"] = fingerprint(result["projection"]["trace"])
         return result
 
+    def readonly_session(self, *, bundle_root=None, readonly_grants=(), readonly_now=None, fault=None):
+        """Construct the bounded P3-S1 profile over this runtime's public A019 seam."""
+        from .readonly_session import ReadonlySession
+        return ReadonlySession(self, bundle_root=bundle_root, readonly_grants=readonly_grants,
+                               readonly_now=readonly_now, fault=fault)
+
     def wake(self, candidate):
         return evaluate_wake(candidate, self.scope)
 
