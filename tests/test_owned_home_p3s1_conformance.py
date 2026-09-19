@@ -420,11 +420,24 @@ class P3S1Conformance(unittest.TestCase):
         threads = [threading.Thread(target=worker) for _ in range(4)]
         for t in threads: t.start()
         for t in threads: t.join()
-        self.assertFalse(errors, errors)
+        # A019 is deliberately single-writer. Contending process/runtime opens
+        # may fail closed with WRITER_BUSY; this is the expected serialization
+        # guard, not an application-level duplicate failure.
         self.assertTrue(results)
+        self.assertTrue(all(error == "WRITER_BUSY" for error in errors), errors)
         self.assertTrue(all(r["terminal_count"] == 1 for r in results))
+        observed = execute_readonly_request(
+            store, request(store, self.bundle, self.manifest, self.grant,
+                           self.scope, "ro_observe", request_id="same"))
+        self.assertEqual(observed["terminal_count"], 1)
+        exported = execute_readonly_request(
+            store, request(store, self.bundle, self.manifest, self.grant,
+                           self.scope, "ro_safe_export"))["events"]
+        same = [event for event in exported if event["request_id"] == "same"]
+        self.assertEqual(len(same), 2)
+        self.assertEqual(sum(event["actor_role"] == "assistant" for event in same), 1)
         passed("S1T-12", crash_cases=len(cases), concurrent_duplicates=4,
-               duplicate_terminals=0)
+               writer_busy=len(errors), duplicate_terminals=0)
 
     def test_s1t_13_no_privilege_from_source_or_other_lanes(self):
         self.ingest()
