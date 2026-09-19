@@ -1,4 +1,4 @@
-"""WO-ENG-C1-A018-S0-01: 27 G0 offline checks, not independent acceptance.
+"""WO-ENG-C1-A018-S0-01: C1 S0 offline checks, not independent acceptance.
 
 Run directly with --receipt <temp-path> for a machine-readable return receipt.
 Fixtures are authored expectations; no live browser or provider is used.
@@ -30,6 +30,23 @@ from companion_mind.journal.codec import JournalError, load_schema, prepare
 FIXTURES = ROOT / 'tests/fixtures/c1_chatgpt_web_v0_1'
 DOCS = ROOT / 'docs/browser_sidecar'
 MANIFEST = json.loads((FIXTURES / 'manifest.json').read_text())
+
+A029_P3S1_MUTABLE_OWNED_HOME = frozenset({
+    'companion_mind/owned_home/source_pack.py',
+    'companion_mind/owned_home/readonly_session.py',
+    'companion_mind/owned_home/runtime.py',
+    'companion_mind/owned_home/testport.py',
+    'companion_mind/owned_home/shell.py',
+    'companion_mind/owned_home/trace.py',
+})
+
+
+def c1_a029_frozen_predicate(path):
+    """Preserve C1 S0 pins except the exact six later-authority A029 paths."""
+    return ('chatgpt_recovery' not in path and
+            path != 'docs/c2-recovery-prototype.md' and
+            path not in A029_P3S1_MUTABLE_OWNED_HOME)
+
 
 
 def fixture(n):
@@ -375,7 +392,42 @@ class S0Tests(unittest.TestCase):
         self.check_readonly(lambda p:'chatgpt_recovery' in p or p=='docs/c2-recovery-prototype.md')
 
     def test_g0_26_a019_contract_owned_home_unchanged(self):
-        self.check_readonly(lambda p:'chatgpt_recovery' not in p and p!='docs/c2-recovery-prototype.md')
+        self.check_readonly(c1_a029_frozen_predicate)
+
+    def test_g0_26a_a029_compatibility_negative_guards(self):
+        expected = {
+            'companion_mind/owned_home/source_pack.py',
+            'companion_mind/owned_home/readonly_session.py',
+            'companion_mind/owned_home/runtime.py',
+            'companion_mind/owned_home/testport.py',
+            'companion_mind/owned_home/shell.py',
+            'companion_mind/owned_home/trace.py',
+        }
+        self.assertEqual(A029_P3S1_MUTABLE_OWNED_HOME, expected)
+        self.assertTrue(c1_a029_frozen_predicate('companion_mind/owned_home/action_control.py'))
+        self.assertTrue(c1_a029_frozen_predicate('companion_mind/owned_home/future_unapproved.py'))
+        self.assertTrue(all(not c1_a029_frozen_predicate(path) for path in expected))
+
+        # A seventh Owned Home path must still make the frozen-set check fail.
+        probe = ROOT / 'companion_mind/owned_home/__a029_unapproved_probe__.py'
+        self.assertFalse(probe.exists())
+        try:
+            probe.write_text('# synthetic compatibility guard\n')
+            with self.assertRaises(AssertionError):
+                self.check_readonly(c1_a029_frozen_predicate)
+        finally:
+            probe.unlink(missing_ok=True)
+
+        # A non-exempt pinned Owned Home hash change must still fail.
+        pinned = ROOT / 'companion_mind/owned_home/action_control.py'
+        original = pinned.read_bytes()
+        try:
+            pinned.write_bytes(original + b'\n# synthetic compatibility hash guard\n')
+            with self.assertRaises(AssertionError):
+                self.check_readonly(c1_a029_frozen_predicate)
+        finally:
+            pinned.write_bytes(original)
+        self.check_readonly(c1_a029_frozen_predicate)
 
     def test_g0_27_100_repeated_parse_replay_cycles(self):
         for n in range(1,21):

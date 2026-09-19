@@ -520,7 +520,13 @@ class Slice1Conformance(unittest.TestCase):
         # Fresh base 40389094/tree3a0b5b51; all S4 tool semantics and TS4 protected.
         allowed = {"companion_mind/owned_home/" + name + ".py" for name in
                    ("runtime", "shell", "testport", "trace", "human_control", "continuation")}
-        allowed.add("tests/test_owned_home_slice1_conformance.py")
+        allowed.update({
+            "tests/test_owned_home_slice1_conformance.py",
+            "companion_mind/owned_home/source_pack.py",
+            "companion_mind/owned_home/readonly_session.py",
+            "tests/test_owned_home_p3s1_conformance.py",
+            "docs/owned_home_p3s1_contract_v1.md",
+        })
         def permitted(path):
             if path == "tests/test_browser_sidecar_s1.py":
                 return True
@@ -550,11 +556,13 @@ class Slice1Conformance(unittest.TestCase):
                            cwd=ROOT, env=env, check=True)
             reconstructed = subprocess.check_output(["git", "write-tree"], cwd=ROOT, env=env, text=True).strip()
             self.assertEqual(reconstructed, "60b0dc12c68bddf6edb508345c6c6fbccf48cdf7")
-        for name in sorted(allowed - {"tests/test_owned_home_slice1_conformance.py"} |
-                           {"companion_mind/owned_home/contracts.py", "companion_mind/owned_home/index.py",
-                            "companion_mind/owned_home/router.py", "companion_mind/owned_home/context.py",
-                            "companion_mind/owned_home/model_gateway.py", "companion_mind/owned_home/tool_gateway.py",
-                            "companion_mind/owned_home/permission.py", "companion_mind/owned_home/action_control.py"}):
+        scan_names = {name for name in allowed
+                      if name.startswith("companion_mind/owned_home/") and name.endswith(".py")}
+        scan_names |= {"companion_mind/owned_home/contracts.py", "companion_mind/owned_home/index.py",
+                       "companion_mind/owned_home/router.py", "companion_mind/owned_home/context.py",
+                       "companion_mind/owned_home/model_gateway.py", "companion_mind/owned_home/tool_gateway.py",
+                       "companion_mind/owned_home/permission.py", "companion_mind/owned_home/action_control.py"}
+        for name in sorted(scan_names):
             source = (ROOT / name).read_text()
             tree = ast.parse(source)
             if not name.endswith(("shell.py", "index.py")):
