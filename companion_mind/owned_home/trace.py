@@ -81,3 +81,27 @@ def model_trace(gateway, result):
              "real_provider_invocations": 0, "stop_reason": gateway["stop_reason"]}
     trace["trace_fingerprint"] = fingerprint(trace)
     return trace
+
+
+def readonly_trace(envelope):
+    """Content-minimized public trace for the P3-S1 readonly profile."""
+    value = {
+        "trace_version": "readonly-trace/1", "authority": False,
+        "profile_version": envelope["profile_version"],
+        "task_id": envelope["task_id"], "session_id": envelope["session_id"],
+        "request_id": envelope["request_id"],
+        "package": {
+            "package_id": envelope["package_id"],
+            "package_version": envelope["package_version"],
+            "manifest_digest": envelope["manifest_digest"],
+        },
+        "grant_ref": envelope["grant_ref"], "status": envelope["status"],
+        "answerability": envelope["answerability"], "time_basis": envelope["time_basis"],
+        "as_of": envelope["as_of"], "source_refs": envelope["source_refs"],
+        "conflicts": envelope["conflicts"],
+        "omitted_required_evidence": envelope["omitted_required_evidence"],
+        "synthetic_cognition": True, "authorization_effect": "NONE",
+        "real_provider_invocations": 0, "external_side_effects": 0,
+        "authority_mutation_count": 0,
+    }
+    return {**value, "trace_fingerprint": fingerprint(value)}
