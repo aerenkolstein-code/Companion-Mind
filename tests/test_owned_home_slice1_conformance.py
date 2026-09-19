@@ -520,7 +520,13 @@ class Slice1Conformance(unittest.TestCase):
         # Fresh base 40389094/tree3a0b5b51; all S4 tool semantics and TS4 protected.
         allowed = {"companion_mind/owned_home/" + name + ".py" for name in
                    ("runtime", "shell", "testport", "trace", "human_control", "continuation")}
-        allowed.add("tests/test_owned_home_slice1_conformance.py")
+        allowed.update({
+            "tests/test_owned_home_slice1_conformance.py",
+            "companion_mind/owned_home/source_pack.py",
+            "companion_mind/owned_home/readonly_session.py",
+            "tests/test_owned_home_p3s1_conformance.py",
+            "docs/owned_home_p3s1_contract_v1.md",
+        })
         def permitted(path):
             # Explicitly approved C1 S0 publication compatibility allowance.
             c1_prefixes = (

@@ -22,6 +22,8 @@ from .testport import OwnedHomeTestPort, validate_operation
 from .human_control import OwnerFixture
 from .tool_gateway import ActionRequest, ToolTarget
 from .permission import SyntheticGrant
+from .source_pack import READONLY_PROFILE, activate_bundle, ensure_demo_bundle
+from .readonly_session import execute_readonly_request
 
 SCOPE = Scope("synthetic-home", "synthetic-owner")
 FIXTURE = AuthorityFixture("local-demo", "v1", SCOPE.universe_id, SCOPE.access_subject_id,
@@ -31,6 +33,36 @@ TOOL_TARGET = ToolTarget("public-target", SCOPE.universe_id, SCOPE.access_subjec
 TOOL_GRANT = SyntheticGrant("shell-tool-grant", SCOPE.universe_id, SCOPE.access_subject_id,
                             ("public-target",), ("read", "write"))
 HUMAN_OWNER = OwnerFixture("synthetic-speaker", SCOPE.universe_id, SCOPE.access_subject_id)
+
+READONLY_HTML = """<!doctype html><html lang="en"><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Companion-Mind · Read-only continuity</title>
+<body><main><h1>Read-only continuity</h1><p>Public-safe synthetic demo.</p>
+<form id="form" autocomplete="off"><textarea id="message" rows="5" cols="64" maxlength="8000" required></textarea>
+<button id="submit">Ask</button><button id="resume" type="button" hidden>Resume</button></form>
+<p id="status"></p><pre id="reply"></pre></main><script src="/readonly.js"></script></body></html>"""
+
+READONLY_JS = """'use strict';
+const $ = id => document.getElementById(id);
+const key = 'owned-home-readonly-v1:' + location.origin;
+let handle = null;
+function persist(id) { handle = id ? {request_id:id} : null;
+  if (handle) localStorage.setItem(key, JSON.stringify(handle)); else localStorage.removeItem(key); }
+function render(r) { $('status').textContent = r.stop_reason || r.status || '';
+  $('reply').textContent = r.visible_reply || ''; $('resume').hidden = r.status !== 'AWAIT_EXPLICIT_RESUME'; }
+async function call(body) { const response = await fetch('/v1/readonly', {method:'POST',
+  headers:{'Content-Type':'application/json','X-Owned-Home':'1'}, body:JSON.stringify(body)});
+  const data = await response.json(); if (!data.ok) throw new Error(data.error); render(data.result); return data.result; }
+$('form').addEventListener('submit', async event => { event.preventDefault();
+  const text = $('message').value; const id = crypto.randomUUID(); persist(id); $('message').value = '';
+  try { await call({op:'ro_turn',request_id:id,message:text}); } catch (error) { $('status').textContent = error.message; } });
+$('resume').addEventListener('click', async () => { if (!handle) return;
+  try { await call({op:'ro_resume',request_id:handle.request_id}); } catch (error) { $('status').textContent = error.message; } });
+addEventListener('pagehide', () => { $('message').value = ''; });
+try { const saved = JSON.parse(localStorage.getItem(key)); if (saved && typeof saved.request_id === 'string') {
+  handle = {request_id:saved.request_id}; call({op:'ro_observe',request_id:saved.request_id}).catch(()=>{});
+} else { localStorage.removeItem(key); } } catch (_) { localStorage.removeItem(key); }
+"""
 
 HTML = """<!doctype html><html lang="en"><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
@@ -580,6 +612,21 @@ def make_server(directory, *, host="127.0.0.1", port=0):
     if type(port) is not int or not 0 <= port <= 65535:
         raise HomeError("INVALID_PORT")
     directory = Path(directory)
+    directory.mkdir(parents=True, exist_ok=True)
+    readonly_now = datetime.now(timezone.utc).isoformat()
+    readonly_input, readonly_grant, readonly_manifest = ensure_demo_bundle(
+        directory / "readonly-demo-input", readonly_now)
+    activate_bundle(readonly_input, directory / "readonly", readonly_grant, readonly_now)
+
+    def readonly_request(operation):
+        request = {
+            "contract_version": VERSION, "profile_version": READONLY_PROFILE,
+            "scope": SCOPE.projection(), "readonly_bundle_root": str(readonly_input),
+            "readonly_grants": [readonly_grant],
+            "readonly_now": datetime.now(timezone.utc).isoformat(),
+            **operation,
+        }
+        return execute_readonly_request(directory, request)
 
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, *_):
@@ -626,12 +673,16 @@ def make_server(directory, *, host="127.0.0.1", port=0):
                 return self._send(200, HUMAN_HTML, "text/html")
             if self.path == "/human.js":
                 return self._send(200, HUMAN_JS, "application/javascript")
+            if self.path == "/readonly":
+                return self._send(200, READONLY_HTML, "text/html")
+            if self.path == "/readonly.js":
+                return self._send(200, READONLY_JS, "application/javascript")
             self._send(404, encode({"ok": False, "error": "ROUTE_NOT_FOUND"}))
 
         def do_POST(self):
             if not self._origin() or self.headers.get("X-Owned-Home") != "1":
                 return self._send(403, encode({"ok": False, "error": "ORIGIN_DENIED"}))
-            if self.path not in ("/v1/turn", "/v1/tool", "/v1/human"):
+            if self.path not in ("/v1/turn", "/v1/tool", "/v1/human", "/v1/readonly"):
                 return self._send(404, encode({"ok": False, "error": "ROUTE_NOT_FOUND"}))
             try:
                 lengths = self.headers.get_all("Content-Length") or []
@@ -643,6 +694,48 @@ def make_server(directory, *, host="127.0.0.1", port=0):
                 self.connection.settimeout(3)
                 body = json.loads(self.rfile.read(length))
                 op = body.get("op")
+                if self.path == "/v1/readonly":
+                    exact_keys(body, ("op",), ("request_id", "message", "source_id", "selector"))
+                    op = body["op"]
+                    if op == "ro_turn":
+                        exact_keys(body, ("op", "request_id", "message"))
+                        identifier = body["request_id"]
+                        if not isinstance(identifier, str) or len(identifier) > 80:
+                            raise HomeError("INVALID_ID")
+                        state = readonly_request({"op": "ro_session_state",
+                                                  "task_id": readonly_manifest["task_id"],
+                                                  "session_id": "shell-readonly-session"})
+                        managed = {"op": "ro_turn", "turn": {
+                            "task_id": readonly_manifest["task_id"],
+                            "session_id": "shell-readonly-session",
+                            "request_id": identifier, "turn_id": identifier,
+                            "turn_no": state["next_turn_no"],
+                            "package_id": readonly_manifest["package_id"],
+                            "package_version": readonly_manifest["package_version"],
+                            "manifest_digest": readonly_manifest["manifest_digest"],
+                            "question": body["message"], "universe_id": SCOPE.universe_id,
+                            "access_subject_id": SCOPE.access_subject_id,
+                            "evidence_needs": [{"source_id": "current", "selector": "agenda"}],
+                            "budget_bytes": 4096,
+                        }}
+                    elif op in {"ro_observe", "ro_resume"}:
+                        exact_keys(body, ("op", "request_id"))
+                        managed = {"op": op, "request_id": body["request_id"]}
+                    elif op == "ro_info":
+                        exact_keys(body, ("op",))
+                        managed = {"op": "ro_info"}
+                    elif op == "ro_safe_export":
+                        exact_keys(body, ("op",))
+                        managed = {"op": "ro_safe_export"}
+                    elif op == "ro_source_view":
+                        exact_keys(body, ("op", "source_id", "selector"))
+                        managed = {"op": op, "package_id": readonly_manifest["package_id"],
+                                   "package_version": readonly_manifest["package_version"],
+                                   "manifest_digest": readonly_manifest["manifest_digest"],
+                                   "source_id": body["source_id"], "selector": body["selector"]}
+                    else:
+                        raise HomeError("OPERATION_NOT_IN_SLICE")
+                    return self._send(200, encode({"ok": True, "result": readonly_request(managed)}))
                 if self.path == "/v1/human":
                     if op not in {"human_request", "human_respond", "human_observe", "human_resume", "human_cancel"}:
                         raise HomeError("OPERATION_NOT_IN_SLICE")
