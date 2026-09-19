@@ -554,11 +554,13 @@ class Slice1Conformance(unittest.TestCase):
                            cwd=ROOT, env=env, check=True)
             reconstructed = subprocess.check_output(["git", "write-tree"], cwd=ROOT, env=env, text=True).strip()
             self.assertEqual(reconstructed, "60b0dc12c68bddf6edb508345c6c6fbccf48cdf7")
-        for name in sorted(allowed - {"tests/test_owned_home_slice1_conformance.py"} |
-                           {"companion_mind/owned_home/contracts.py", "companion_mind/owned_home/index.py",
-                            "companion_mind/owned_home/router.py", "companion_mind/owned_home/context.py",
-                            "companion_mind/owned_home/model_gateway.py", "companion_mind/owned_home/tool_gateway.py",
-                            "companion_mind/owned_home/permission.py", "companion_mind/owned_home/action_control.py"}):
+        scan_names = {name for name in allowed
+                      if name.startswith("companion_mind/owned_home/") and name.endswith(".py")}
+        scan_names |= {"companion_mind/owned_home/contracts.py", "companion_mind/owned_home/index.py",
+                       "companion_mind/owned_home/router.py", "companion_mind/owned_home/context.py",
+                       "companion_mind/owned_home/model_gateway.py", "companion_mind/owned_home/tool_gateway.py",
+                       "companion_mind/owned_home/permission.py", "companion_mind/owned_home/action_control.py"}
+        for name in sorted(scan_names):
             source = (ROOT / name).read_text()
             tree = ast.parse(source)
             if not name.endswith(("shell.py", "index.py")):

@@ -32,7 +32,7 @@ from companion_mind.owned_home.shell import make_server
 
 BASE_SHA = "709c590387f745b8716537f11cc40cd469001753"
 BASE_TREE = "19cdee17eadf4c7aa16709792e33115812d08d6f"
-PROTECTED_TREE = "60b0dc12c68bddf6edb508345c6c6fbccf48cdf7"
+PROTECTED_TREE = "94d5c674a431f37ca6ff25016afa9f41dd9402cd"
 MATRIX = {}
 
 
@@ -143,26 +143,39 @@ class P3S1Conformance(unittest.TestCase):
             "companion_mind/owned_home/shell.py",
             "companion_mind/owned_home/trace.py",
             "tests/test_owned_home_slice1_conformance.py",
+            # Separate accepted C1 compatibility amendment.
+            "tests/test_browser_sidecar_s0.py",
         }
         def git(*args):
             return subprocess.check_output(["git", *args], cwd=ROOT, text=True).strip()
-        changed = set(git("show", "--pretty=", "--name-only", "HEAD").splitlines())
-        self.assertTrue(changed.issubset(allowed), changed)
+        # PR checkout may be a shallow synthetic merge commit. Prove that every
+        # path outside the approved P3-S1 + compatibility surface is byte-identical
+        # by reconstructing the protected tree instead of diffing unavailable parents.
         with tempfile.TemporaryDirectory() as temp:
             env = dict(os.environ, GIT_INDEX_FILE=str(Path(temp) / "index"))
             subprocess.run(["git", "read-tree", "HEAD"], cwd=ROOT, env=env, check=True)
-            subprocess.run(["git", "update-index", "--force-remove", "--", *sorted(allowed)],
+            tracked_surface = [p for p in git("ls-files").splitlines() if p in allowed]
+            subprocess.run(["git", "update-index", "--force-remove", "--", *tracked_surface],
                            cwd=ROOT, env=env, check=True)
             tree = subprocess.check_output(["git", "write-tree"], cwd=ROOT, env=env, text=True).strip()
         self.assertEqual(tree, PROTECTED_TREE)
+        for required in (
+            "companion_mind/owned_home/source_pack.py",
+            "companion_mind/owned_home/readonly_session.py",
+            "tests/test_owned_home_p3s1_conformance.py",
+            "docs/owned_home_p3s1_contract_v1.md",
+        ):
+            self.assertTrue((ROOT / required).is_file(), required)
         passed("S1T-01", base_sha=BASE_SHA, base_tree=BASE_TREE,
-               changed_paths=sorted(changed), protected_tree=tree)
+               authorized_surface=sorted(allowed), protected_tree=tree)
 
     def test_s1t_02_package_integrity_and_missing_semantics(self):
         valid = self.call("ro_package_validate")
         self.assertEqual(valid["status"], "VALID")
         payload = self.bundle / "payload" / "current.txt"
-        payload.write_text("tampered", encoding="utf-8")
+        original = payload.read_bytes()
+        self.assertTrue(original)
+        payload.write_bytes(bytes([original[0] ^ 1]) + original[1:])
         with self.assertRaisesRegex(HomeError, "CONTENT_DIGEST_MISMATCH"):
             self.call("ro_package_validate")
         empty_root = self.root / "empty"

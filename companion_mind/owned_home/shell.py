@@ -612,13 +612,20 @@ def make_server(directory, *, host="127.0.0.1", port=0):
     if type(port) is not int or not 0 <= port <= 65535:
         raise HomeError("INVALID_PORT")
     directory = Path(directory)
-    directory.mkdir(parents=True, exist_ok=True)
-    readonly_now = datetime.now(timezone.utc).isoformat()
-    readonly_input, readonly_grant, readonly_manifest = ensure_demo_bundle(
-        directory / "readonly-demo-input", readonly_now)
-    activate_bundle(readonly_input, directory / "readonly", readonly_grant, readonly_now)
+    readonly_state = None
+
+    def readonly_setup():
+        nonlocal readonly_state
+        if readonly_state is None:
+            readonly_now = datetime.now(timezone.utc).isoformat()
+            readonly_input, readonly_grant, readonly_manifest = ensure_demo_bundle(
+                directory / "readonly-demo-input", readonly_now)
+            activate_bundle(readonly_input, directory / "readonly", readonly_grant, readonly_now)
+            readonly_state = (readonly_input, readonly_grant, readonly_manifest)
+        return readonly_state
 
     def readonly_request(operation):
+        readonly_input, readonly_grant, _ = readonly_setup()
         request = {
             "contract_version": VERSION, "profile_version": READONLY_PROFILE,
             "scope": SCOPE.projection(), "readonly_bundle_root": str(readonly_input),
@@ -699,6 +706,7 @@ def make_server(directory, *, host="127.0.0.1", port=0):
                     op = body["op"]
                     if op == "ro_turn":
                         exact_keys(body, ("op", "request_id", "message"))
+                        _, _, readonly_manifest = readonly_setup()
                         identifier = body["request_id"]
                         if not isinstance(identifier, str) or len(identifier) > 80:
                             raise HomeError("INVALID_ID")

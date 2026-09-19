@@ -94,7 +94,7 @@ def _safe_reason(exc):
         "GRANT_REVOKED", "GRANT_NOT_ACTIVE", "REVOCATION_EPOCH_ROLLBACK",
         "OPERATION_NOT_GRANTED", "PACKAGE_NOT_ACTIVE", "PACKAGE_BINDING_MISMATCH",
         "GRANT_PACKAGE_BINDING_MISMATCH", "GRANT_SCOPE_MISMATCH",
-        "SOURCE_EXPIRED", "READONLY_GRANT_REQUIRED",
+        "SOURCE_EXPIRED", "READONLY_GRANT_REQUIRED", "SCOPE_DENIED",
     }:
         return code
     return "READONLY_ACCESS_DENIED"
@@ -230,6 +230,10 @@ class ReadonlySession:
         return read_manifest(self.bundle_root)
 
     def _grant(self, manifest, operation):
+        source_scopes = {(s["scope"]["universe_id"], s["scope"]["access_subject_id"])
+                         for s in manifest["sources"]}
+        if source_scopes and source_scopes != {(self.scope.universe_id, self.scope.access_subject_id)}:
+            raise HomeError("SCOPE_DENIED")
         control = self._control()
         candidates = [
             g for g in self.grants
@@ -589,7 +593,7 @@ class ReadonlySession:
                 script=StubScript((reply,), outcome),
             )
             self.runtime.counters["cognition_stub_invocations"] += receipt["provider_invocations"]
-            result = self.observe(turn["request_id"])
+            result = self.observe(turn["request_id"], authorize=False)
             result["receipts"]["user"] = user_receipt
             result["receipts"]["assistant"] = receipt["assistant"]
             result["execution_order"] = [
@@ -602,8 +606,10 @@ class ReadonlySession:
                 self._remember_anchor(turn, terminals[0])
             return result
 
-    def observe(self, request_id):
+    def observe(self, request_id, *, authorize=True):
         identifier(request_id)
+        if authorize:
+            self._checked_input("ro_observe")
         users, terminals = self._lookup(request_id)
         if not users:
             return {
@@ -641,7 +647,8 @@ class ReadonlySession:
         if terminals:
             terminal = terminals[0]
             saved = self._extension(terminal)["projection"]
-            result.update(saved)
+            result.update({k: v for k, v in saved.items()
+                           if k not in {"receipts", "safe_counters"}})
             result["status"] = terminal["status"]
             result["visible_reply"] = terminal["content_payload"].get("text", "")
             result["terminal_count"] = 1
@@ -653,6 +660,7 @@ class ReadonlySession:
         return result
 
     def resume(self, request_id):
+        self._checked_input("ro_resume")
         users, _ = self._lookup(request_id)
         if not users:
             raise HomeError("RESUME_TARGET_MISSING")
@@ -678,6 +686,7 @@ class ReadonlySession:
         return {"status": "NOT_LOOKED_UP", "text": None}
 
     def session_state(self, task_id, session_id):
+        self._checked_input("ro_session_state")
         rows = [
             e for e in self._events()
             if e["actor_role"] == "user" and
@@ -704,6 +713,7 @@ class ReadonlySession:
         }
 
     def safe_export(self):
+        self._checked_input("ro_safe_export")
         exported = []
         for event in self._events():
             extension = self._extension(event)
