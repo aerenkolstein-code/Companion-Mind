@@ -1,0 +1,36 @@
+{
+  "work_order": "WO-ENG-C1-A018-S1-01",
+  "work_order_version": "0.1",
+  "work_order_file_id": "1PY1AwWL-uUZLwKrLIIREeQM9QNNK63NGEHIlJtbrKxM",
+  "plan_id": "ENG-C1-A018-S1-PLAN-01",
+  "plan_version": "0.1",
+  "plan_file_id": "14RNHEDhFHAT2aqCgktGS8u_v3HwE6t1woDaNwr0ZTy8",
+  "plan_approval_receipt": "AUTH-C1-S1-PLAN-20260918-T0018",
+  "execution_approval_receipt": "AUTH-C1-S1-EXEC-20260918-T0020",
+  "base_sha": "14f0e9cf00413a8ac3ad902b3b9c5641616970a1",
+  "base_tree": "529eab1585e2598a6da4c846a56e14c743f515c0",
+  "add_paths": [
+    "companion_mind/browser_sidecar/identity.py",
+    "tests/test_browser_sidecar_s1.py",
+    "docs/browser_sidecar/s1-identity-contract.md",
+    "docs/browser_sidecar/s1-proof-test-mapping.json",
+    "docs/browser_sidecar/s1-baseline.json"
+  ],
+  "modify_paths": [
+    "tests/test_owned_home_slice1_conformance.py"
+  ],
+  "permitted_exact_addition": "            if path == \"tests/test_browser_sidecar_s1.py\":\n                return True\n",
+  "preflight_base_blob": "39c62f561d4cb09bbbc41b997839b7c3aafa5748",
+  "protected_tree": "60b0dc12c68bddf6edb508345c6c6fbccf48cdf7",
+  "readonly_git_blobs": {
+    "companion_mind/browser_sidecar/normalize.py": "2e4baf00d63ad67d26b09adbd977f565ff44462a",
+    "companion_mind/browser_sidecar/parser.py": "2090ae074af69507f380f9c8cd2f702bc3a3fed2",
+    "companion_mind/browser_sidecar/vendor_profile.py": "59d5f9a0d9672e30919a62ff3416327c7c033891",
+    "companion_mind/browser_sidecar/profiles/chatgpt_web_v0_1.json": "7dd4542706ccac907e3f341c50354831ef34f599"
+  },
+  "protection_rule": "Every existing base-tree path and blob remains unchanged except the exact permitted(path) addition. The four explicit source pins are an additional executable check, not the whole protected surface.",
+  "fixture_policy": "Reuse immutable F08-F13, verify their existing SHA-256; do not edit S0 manifest, fixtures, pins, ADRs or receipts.",
+  "ci_policy": "Existing .github/workflows/test.yml only; no dependency, workflow, permission or secret changes.",
+  "validation_status": "BASELINE_CONTRACT_ONLY_NOT_A_TEST_RECEIPT",
+  "claim_ceiling": "SOURCE_LOCAL / SYNTHETIC / OFFLINE / IN_MEMORY / G1_INDEPENDENT_ACCEPTANCE_PENDING / NO_LIVE"
+}

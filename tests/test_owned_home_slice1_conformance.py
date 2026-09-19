@@ -528,6 +528,8 @@ class Slice1Conformance(unittest.TestCase):
             "docs/owned_home_p3s1_contract_v1.md",
         })
         def permitted(path):
+            if path == "tests/test_browser_sidecar_s1.py":
+                return True
             # Explicitly approved C1 S0 publication compatibility allowance.
             c1_prefixes = (
                 "companion_mind/browser_sidecar/",

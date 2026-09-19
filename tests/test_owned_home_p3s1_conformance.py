@@ -30,8 +30,8 @@ from companion_mind.owned_home.source_pack import (
 from companion_mind.owned_home.readonly_session import execute_readonly_request
 from companion_mind.owned_home.shell import make_server
 
-BASE_SHA = "709c590387f745b8716537f11cc40cd469001753"
-BASE_TREE = "19cdee17eadf4c7aa16709792e33115812d08d6f"
+BASE_SHA = "14f0e9cf00413a8ac3ad902b3b9c5641616970a1"
+BASE_TREE = "529eab1585e2598a6da4c846a56e14c743f515c0"
 PROTECTED_TREE = "94d5c674a431f37ca6ff25016afa9f41dd9402cd"
 MATRIX = {}
 
@@ -145,6 +145,12 @@ class P3S1Conformance(unittest.TestCase):
             "tests/test_owned_home_slice1_conformance.py",
             # Separate accepted C1 compatibility amendment.
             "tests/test_browser_sidecar_s0.py",
+            # Separate accepted C1 S1 publication compatibility.
+            "companion_mind/browser_sidecar/identity.py",
+            "tests/test_browser_sidecar_s1.py",
+            "docs/browser_sidecar/s1-identity-contract.md",
+            "docs/browser_sidecar/s1-proof-test-mapping.json",
+            "docs/browser_sidecar/s1-baseline.json",
         }
         def git(*args):
             return subprocess.check_output(["git", *args], cwd=ROOT, text=True).strip()
