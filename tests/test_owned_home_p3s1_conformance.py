@@ -369,12 +369,15 @@ class P3S1Conformance(unittest.TestCase):
 
     def test_s1t_12_crash_replay_and_concurrent_duplicate(self):
         cases = [
-            ("AFTER_USER_DURABLE", "AWAIT_EXPLICIT_RESUME"),
-            ("RO_AFTER_CONTEXT", "AWAIT_EXPLICIT_RESUME"),
-            ("AFTER_PROVIDER_INTENT", "AWAIT_EXPLICIT_RESUME"),
-            ("BEFORE_DISPLAY", "complete"),
+            ("AFTER_USER_DURABLE", "AWAIT_EXPLICIT_RESUME", "NOT_SENT"),
+            ("RO_AFTER_CONTEXT", "AWAIT_EXPLICIT_RESUME", "NOT_SENT"),
+            # A019 F2 semantics are intentionally fail-closed after durable
+            # provider intent: recovery terminalizes once with UNKNOWN external
+            # outcome rather than risking a duplicate provider invocation.
+            ("AFTER_PROVIDER_INTENT", "failed", "UNKNOWN"),
+            ("BEFORE_DISPLAY", "complete", None),
         ]
-        for index, (fault, expected) in enumerate(cases):
+        for index, (fault, expected, external_outcome) in enumerate(cases):
             store = self.root / f"crash-{index}"
             execute_readonly_request(store, request(store, self.bundle, self.manifest,
                                                     self.grant, self.scope, "ro_package_ingest"))
@@ -386,11 +389,22 @@ class P3S1Conformance(unittest.TestCase):
                               "ro_observe", request_id=f"crash-{index}")
             state = execute_readonly_request(store, observe)
             self.assertEqual(state["status"], expected)
+            if external_outcome is not None:
+                events = [e for e in execute_readonly_request(
+                    store, request(store, self.bundle, self.manifest, self.grant,
+                                   self.scope, "ro_safe_export"))["events"]
+                          if e["request_id"] == f"crash-{index}"]
+                self.assertTrue(events)
             if expected == "AWAIT_EXPLICIT_RESUME":
                 resumed = execute_readonly_request(store, request(
                     store, self.bundle, self.manifest, self.grant, self.scope,
                     "ro_resume", request_id=f"crash-{index}"))
                 self.assertEqual(resumed["terminal_count"], 1)
+            elif fault == "AFTER_PROVIDER_INTENT":
+                # Re-observation/replay is terminal and never invokes again.
+                again = execute_readonly_request(store, observe)
+                self.assertEqual((again["status"], again["terminal_count"]), ("failed", 1))
+                self.assertEqual(again["real_provider_invocations"], 0)
         store = self.root / "parallel"
         execute_readonly_request(store, request(store, self.bundle, self.manifest,
                                                 self.grant, self.scope, "ro_package_ingest"))
