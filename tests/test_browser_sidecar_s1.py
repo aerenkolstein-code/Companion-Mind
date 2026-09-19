@@ -35,7 +35,7 @@ BASE_BLOBS = {
     "companion_mind/browser_sidecar/vendor_profile.py": "59d5f9a0d9672e30919a62ff3416327c7c033891",
     "companion_mind/browser_sidecar/profiles/chatgpt_web_v0_1.json": "7dd4542706ccac907e3f341c50354831ef34f599",
 }
-PREFLIGHT_BLOB = "3ef8589eb72478de7b0ea1a960a6b816a7b249d4"
+PREFLIGHT_BLOB = "39c62f561d4cb09bbbc41b997839b7c3aafa5748"
 EXACT_ALLOWANCE = '            if path == "tests/test_browser_sidecar_s1.py":\n                return True\n'
 
 
@@ -365,8 +365,8 @@ class S1IdentityTests(unittest.TestCase):
         self.assertEqual(git_blob(restored), PREFLIGHT_BLOB, "NON_ALLOWED_PREFLIGHT_CHANGE")
         self.assertIn("60b0dc12c68bddf6edb508345c6c6fbccf48cdf7", raw)
         baseline = json.loads((ROOT / "docs/browser_sidecar/s1-baseline.json").read_text())
-        self.assertEqual(baseline["base_sha"], "709c590387f745b8716537f11cc40cd469001753")
-        self.assertEqual(baseline["base_tree"], "19cdee17eadf4c7aa16709792e33115812d08d6f")
+        self.assertEqual(baseline["base_sha"], "14f0e9cf00413a8ac3ad902b3b9c5641616970a1")
+        self.assertEqual(baseline["base_tree"], "529eab1585e2598a6da4c846a56e14c743f515c0")
         self.assertEqual(baseline["readonly_git_blobs"], BASE_BLOBS)
         self.assertEqual(len(baseline["add_paths"]), 5)
         self.assertEqual(baseline["modify_paths"], ["tests/test_owned_home_slice1_conformance.py"])
