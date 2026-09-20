@@ -145,6 +145,10 @@ class P3S1Conformance(unittest.TestCase):
             "tests/test_owned_home_slice1_conformance.py",
             # Separate accepted C1 compatibility amendment.
             "tests/test_browser_sidecar_s0.py",
+            # Separate authorized P3-S2 offline read-guard prototype surface.
+            "companion_mind/owned_home/docs_read_guard.py",
+            "tests/test_owned_home_docs_read_guard.py",
+            "docs/owned_home_docs_read_guard_v1.md",
         }
         def git(*args):
             return subprocess.check_output(["git", *args], cwd=ROOT, text=True).strip()
