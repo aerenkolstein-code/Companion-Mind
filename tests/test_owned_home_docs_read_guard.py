@@ -37,13 +37,14 @@ from companion_mind.owned_home.tool_gateway import (
 
 BASE_SHA = "14f0e9cf00413a8ac3ad902b3b9c5641616970a1"
 BASE_TREE = "529eab1585e2598a6da4c846a56e14c743f515c0"
-PROTECTED_TREE = "346296033d24dbd5f521b120f4c0a1479cd54ded"
+PROTECTED_TREE = "2d210c5cd283d234ff438487513349430327ed4f"
 ALLOWED_FILES = {
     "companion_mind/owned_home/docs_read_guard.py",
     "tests/test_owned_home_docs_read_guard.py",
     "docs/owned_home_docs_read_guard_v1.md",
     "tests/test_owned_home_p3s1_conformance.py",
     "tests/test_owned_home_slice1_conformance.py",
+    "tests/test_browser_sidecar_s0.py",
 }
 CANARY = "SYNTHETIC_ONLY_RG_SECRET_CANARY_8b3e"
 NOW = "2026-09-20T12:00:00+00:00"

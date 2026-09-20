@@ -40,12 +40,18 @@ A029_P3S1_MUTABLE_OWNED_HOME = frozenset({
     'companion_mind/owned_home/trace.py',
 })
 
+# WO-A1-A029-P3S2-DOCS-READ-GUARD-PROTOTYPE-01: one additive offline module.
+A029_P3S2_ADDED_OWNED_HOME = frozenset({
+    'companion_mind/owned_home/docs_read_guard.py',
+})
+
 
 def c1_a029_frozen_predicate(path):
-    """Preserve C1 S0 pins except the exact six later-authority A029 paths."""
+    """Preserve C1 S0 pins outside exact authorized A029 implementation paths."""
     return ('chatgpt_recovery' not in path and
             path != 'docs/c2-recovery-prototype.md' and
-            path not in A029_P3S1_MUTABLE_OWNED_HOME)
+            path not in A029_P3S1_MUTABLE_OWNED_HOME and
+            path not in A029_P3S2_ADDED_OWNED_HOME)
 
 
 
@@ -404,11 +410,15 @@ class S0Tests(unittest.TestCase):
             'companion_mind/owned_home/trace.py',
         }
         self.assertEqual(A029_P3S1_MUTABLE_OWNED_HOME, expected)
+        self.assertEqual(A029_P3S2_ADDED_OWNED_HOME, {
+            'companion_mind/owned_home/docs_read_guard.py',
+        })
+        self.assertFalse(c1_a029_frozen_predicate('companion_mind/owned_home/docs_read_guard.py'))
         self.assertTrue(c1_a029_frozen_predicate('companion_mind/owned_home/action_control.py'))
         self.assertTrue(c1_a029_frozen_predicate('companion_mind/owned_home/future_unapproved.py'))
         self.assertTrue(all(not c1_a029_frozen_predicate(path) for path in expected))
 
-        # A seventh Owned Home path must still make the frozen-set check fail.
+        # Any further unapproved Owned Home path must still fail the check.
         probe = ROOT / 'companion_mind/owned_home/__a029_unapproved_probe__.py'
         self.assertFalse(probe.exists())
         try:

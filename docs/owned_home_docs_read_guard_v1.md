@@ -199,14 +199,18 @@ All tests are in `tests/test_owned_home_docs_read_guard.py`.
 
 Base SHA: `14f0e9cf00413a8ac3ad902b3b9c5641616970a1`.
 Base tree: `529eab1585e2598a6da4c846a56e14c743f515c0`.
-Exactly five paths are in this implementation surface: the module, this document,
+Exactly six paths are in this implementation surface: the module, this document,
 its new test, and the two existing scope tests
 `tests/test_owned_home_p3s1_conformance.py` /
 `tests/test_owned_home_slice1_conformance.py`.
-Those existing tests receive only three exact new-path allowances; their protected
-tree values and assertions are retained. RG-T19 independently reconstructs the
-tree outside these five paths and compares it with
-`346296033d24dbd5f521b120f4c0a1479cd54ded`.
+Those two tests receive only three exact new-path allowances; their protected
+tree values and assertions are retained. The sixth file,
+`tests/test_browser_sidecar_s0.py`, declares only the new read-guard module as a
+separate P3-S2 addition. Its original six P3-S1 paths, frozen baseline manifest,
+hash assertions, and unapproved-path/hash-mutation negative guards are retained;
+the new addition has its own exact-set assertion. RG-T19 independently reconstructs
+the tree outside these six paths and compares it with
+`2d210c5cd283d234ff438487513349430327ed4f`.
 
 PASS means offline prototype conformance only, ready for independent exact-head
 review under Issue #38. It is not independent acceptance, merge authorization,
