@@ -526,6 +526,10 @@ class Slice1Conformance(unittest.TestCase):
             "companion_mind/owned_home/readonly_session.py",
             "tests/test_owned_home_p3s1_conformance.py",
             "docs/owned_home_p3s1_contract_v1.md",
+            # Separate authorized P3-S2 offline read-guard prototype surface.
+            "companion_mind/owned_home/docs_read_guard.py",
+            "tests/test_owned_home_docs_read_guard.py",
+            "docs/owned_home_docs_read_guard_v1.md",
         })
         def permitted(path):
             # Explicitly approved C1 S0 publication compatibility allowance.
