@@ -105,3 +105,18 @@ they are neither logged nor used for file selection, authorization, or token
 exchange. If the optional `iss` parameter is present, it must be exactly
 `https://accounts.google.com`. This compatibility repair is local-only and does
 not close Connector Alpha's pending real-provider validation stage.
+
+For token-exchange failure diagnosis, the receipt can contain only the fixed
+operation enum, numeric HTTP status, and an allowlisted standard Google error
+code (otherwise `UNKNOWN`). It never includes an error body or description.
+For a small predeclared set of exact static descriptions, the receipt may add a
+fixed `detail_hint`; all other descriptions remain `UNCLASSIFIED`. This is a
+classification rule, not evidence about any particular provider response.
+Google's [installed-app guidance](https://developers.google.com/identity/protocols/oauth2/native-app)
+describes `client_secret` as optional. Connector Alpha deliberately does not
+transmit one. A matching local Desktop-client record may exist in the Windows
+Credential Manager for configuration validation, but current transport does not
+consume its optional secret; that is a capability gap, not a conclusion about a
+specific provider failure. Any future support would require a bounded in-memory
+read from that exact dedicated slot and the existing fixed token endpoint, with
+no logging, persistence, or fallback; it is not enabled by this change.

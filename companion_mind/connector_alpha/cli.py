@@ -118,7 +118,8 @@ def main(argv=None):
             _emit(receipt('BLOCKED', code, google_reads=transport.counts['google_reads'],
                           content_delivered=False, cleanup_local_closed=cleanup['local_closed'],
                           cleanup_remote_state=cleanup['remote_state'],
-                          cleanup_credential_deleted=cleanup['credential_deleted']))
+                          cleanup_credential_deleted=cleanup['credential_deleted'],
+                          provider_diagnostic=getattr(transport, 'last_provider_diagnostic', None)))
             return 2
         result['receipt']['cleanup_local_closed'] = cleanup['local_closed']
         result['receipt']['cleanup_remote_state'] = cleanup['remote_state']
@@ -136,7 +137,8 @@ def main(argv=None):
         _emit(receipt('BLOCKED', code, google_reads=counts.get('google_reads', 'UNKNOWN'),
                       oauth_exchanges=counts.get('oauth_exchanges', 'UNKNOWN'), content_delivered=False,
                       authorization_cleanup_remote_state=getattr(transport, 'cleanup_remote_state', 'NOT_APPLICABLE'),
-                      callback_diagnostic=getattr(flow, 'callback_diagnostic', None)))
+                      callback_diagnostic=getattr(flow, 'callback_diagnostic', None),
+                      provider_diagnostic=getattr(transport, 'last_provider_diagnostic', None)))
         return 2
 
 
