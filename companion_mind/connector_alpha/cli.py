@@ -60,12 +60,13 @@ def main(argv=None):
         binding = Binding.load(args.config)
         broker, transport = CredentialBroker(binding), GoogleTransport(binding)
         if args.command == 'authorize':
-            token, installed = None, False
+            token, installed, listener = None, False, None
+            transport.cleanup_remote_state = 'NOT_NEEDED'
             flow = PkceFlow(binding, args.port)
-            listener = flow.bind_listener()
-            if webbrowser.open(flow.authorization_url) is not True:
-                raise Denied('SYSTEM_BROWSER_UNAVAILABLE')
             try:
+                listener = flow.bind_listener()
+                if webbrowser.open(flow.authorization_url) is not True:
+                    raise Denied('SYSTEM_BROWSER_UNAVAILABLE')
                 code = flow.await_callback(listener)
                 response = transport.exchange_code(code, flow.verifier, flow.redirect_uri)
                 token = response.get('access_token') if type(response) is dict else None
@@ -84,11 +85,17 @@ def main(argv=None):
                 installed = True
             finally:
                 if token is not None and not installed:
-                    try: transport.revoke(token)
-                    except Exception: pass
+                    try:
+                        transport.revoke(token); transport.cleanup_remote_state = 'REVOKED'
+                    except BaseException:
+                        transport.cleanup_remote_state = 'UNKNOWN'
                 token = code = None
+                if listener is not None:
+                    flow.close_listener(listener)
             _emit(receipt('AUTHORIZED', 'LOCAL_SESSION_CREDENTIAL_STORED', oauth_exchanges=transport.counts['oauth_exchanges'],
-                          google_reads=transport.counts['google_reads'], content_delivered=False))
+                          google_reads=transport.counts['google_reads'], content_delivered=False,
+                          authorization_cleanup_remote_state=transport.cleanup_remote_state,
+                          listener_closed=True))
             return 0
         session = ConnectorSession(binding, broker, transport)
         if args.command == 'revoke':
@@ -120,7 +127,8 @@ def main(argv=None):
         code = str(exc) if type(exc) in (Denied,) else 'CONNECTOR_FAILED_CLOSED'
         counts = transport.counts if transport is not None else {}
         _emit(receipt('BLOCKED', code, google_reads=counts.get('google_reads', 'UNKNOWN'),
-                      oauth_exchanges=counts.get('oauth_exchanges', 'UNKNOWN'), content_delivered=False))
+                      oauth_exchanges=counts.get('oauth_exchanges', 'UNKNOWN'), content_delivered=False,
+                      authorization_cleanup_remote_state=getattr(transport, 'cleanup_remote_state', 'NOT_APPLICABLE')))
         return 2
 
 

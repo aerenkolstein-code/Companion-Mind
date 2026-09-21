@@ -59,8 +59,10 @@ class PkceFlow:
             def log_message(self, *_): return
             def do_GET(self):
                 try:
-                    require(self.headers.get('Host') == '127.0.0.1:%d' % flow.port
+                    self.connection.settimeout(2)
+                    require(self.headers.get_all('Host') == ['127.0.0.1:%d' % flow.port]
                             and self.headers.get('Content-Length') in (None, '0')
+                            and self.headers.get('Transfer-Encoding') is None
                             and len(self.path.encode('ascii')) <= 4096, 'CALLBACK_INVALID')
                     received['code'] = flow.accept_callback('http://127.0.0.1:%d%s' % (flow.port, self.path))
                     self.send_response(204)
@@ -73,6 +75,11 @@ class PkceFlow:
             while not done.is_set() and not received: server.handle_request()
         thread = threading.Thread(target=serve, daemon=True); thread.start()
         return server, thread, done, received
+
+    @staticmethod
+    def close_listener(listener):
+        server, thread, done, _ = listener
+        done.set(); server.server_close(); thread.join(2)
 
     def await_callback(self, listener, timeout=300):
         require(type(timeout) is int and 1 <= timeout <= 600, 'CALLBACK_TIMEOUT_INVALID')
