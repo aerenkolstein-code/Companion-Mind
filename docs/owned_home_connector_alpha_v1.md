@@ -94,3 +94,14 @@ second process cannot resume a consumed read grant. The `read` command already
 performs cleanup; `revoke` is the manual recovery command when a prior command
 did not finish cleanup. Do not copy authorization codes, callback URLs, tokens,
 or browser cookies into the terminal or config file.
+
+## Authorization response compatibility
+
+The callback keeps strict single-value checks for `code`, `state`, `scope`, and
+the exact Picker file ID. It rejects repeated parameters, missing or empty core
+parameters, and mixed success/error responses. Per OAuth authorization-response
+compatibility rules ([RFC 6749 section 4.1.2](https://www.rfc-editor.org/rfc/rfc6749#section-4.1.2)), unrelated single-value extension parameters are ignored:
+they are neither logged nor used for file selection, authorization, or token
+exchange. If the optional `iss` parameter is present, it must be exactly
+`https://accounts.google.com`. This compatibility repair is local-only and does
+not close Connector Alpha's pending real-provider validation stage.

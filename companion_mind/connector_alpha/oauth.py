@@ -10,6 +10,10 @@ from urllib.parse import urlencode, parse_qs, urlparse
 
 from .contract import Denied, MIME, SCOPE, require
 
+GOOGLE_ISSUER = 'https://accounts.google.com'
+_SUCCESS = ('code', 'state', 'scope', 'picked_file_ids')
+_DIAGNOSTIC = (*_SUCCESS, 'error', 'iss')
+
 
 def _token(n):
     return secrets.token_urlsafe(n)
@@ -41,27 +45,28 @@ class PkceFlow:
         require(parsed.scheme == 'http' and parsed.hostname == '127.0.0.1' and parsed.port == self.port
                 and parsed.path == '/callback' and not parsed.fragment, 'CALLBACK_INVALID')
         query = parse_qs(parsed.query, keep_blank_values=True, strict_parsing=True)
-        require(set(query) in ({'code', 'state', 'scope', 'picked_file_ids'},
-                               {'error', 'state'}), 'CALLBACK_INVALID')
+        require(all(len(values) == 1 for values in query.values()), 'CALLBACK_DUPLICATE_PARAMETER')
+        has_error = 'error' in query
+        has_success = any(name in query for name in ('code', 'scope', 'picked_file_ids'))
+        require(not (has_error and has_success), 'CALLBACK_MIXED_RESPONSE')
         require(query.get('state') == [self.state], 'STATE_MISMATCH')
-        require('error' not in query, 'CONSENT_CANCELLED')
+        if 'iss' in query:
+            require(query['iss'] == [GOOGLE_ISSUER], 'ISSUER_MISMATCH')
+        if has_error:
+            require(query.get('error', [''])[0] != '', 'CALLBACK_INVALID')
+            raise Denied('CONSENT_CANCELLED')
+        require(all(name in query and query[name][0] != '' for name in _SUCCESS), 'CALLBACK_INVALID')
         require(query.get('scope') == [SCOPE], 'SCOPE_MISMATCH')
         require(query.get('picked_file_ids') == [self.binding.file_id], 'PICKER_FILE_MISMATCH')
-        require(len(query.get('code', ())) == 1 and len(query.get('scope', ())) == 1
-                and len(query.get('picked_file_ids', ())) == 1, 'CALLBACK_INVALID')
         code = query['code'][0]
         require(20 <= len(code) <= 2048 and all(ord(c) >= 33 for c in code), 'AUTHORIZATION_CODE_INVALID')
         self.used = True
-        self.callback_diagnostic = {'stage': 'ACCEPTED', 'known_present': {'code': True, 'state': True,
-                                    'scope': True, 'picked_file_ids': True, 'error': False},
-                                    'known_duplicate': {'code': False, 'state': False, 'scope': False,
-                                                        'picked_file_ids': False, 'error': False},
-                                    'unknown_field_count': 0}
+        self.callback_diagnostic = {**self.callback_diagnostic, 'stage': 'ACCEPTED'}
         return code
 
     def diagnose_callback(self, callback_url):
         """Return only a bounded, non-secret callback failure projection."""
-        names = ('code', 'state', 'scope', 'picked_file_ids', 'error')
+        names = _DIAGNOSTIC
         empty = {'stage': 'URL_PARSE', 'known_present': {name: False for name in names},
                  'known_duplicate': {name: False for name in names}, 'unknown_field_count': 0}
         try:
@@ -80,12 +85,20 @@ class PkceFlow:
                   'known_duplicate': duplicate, 'unknown_field_count': unknown}
         if self.used:
             return {**result, 'stage': 'REPLAY'}
-        if unknown or any(duplicate.values()) or set(pairs) not in ({'code', 'state', 'scope', 'picked_file_ids'}, {'error', 'state'}):
-            return result
+        if any(duplicate.values()) or any(len(values) > 1 for values in pairs.values()):
+            return {**result, 'stage': 'QUERY_DUPLICATE'}
+        has_error = 'error' in pairs
+        has_success = any(name in pairs for name in ('code', 'scope', 'picked_file_ids'))
+        if has_error and has_success:
+            return {**result, 'stage': 'RESPONSE_MIXED'}
         if pairs.get('state') != [self.state]:
             return {**result, 'stage': 'STATE'}
-        if 'error' in pairs:
-            return {**result, 'stage': 'CONSENT'}
+        if 'iss' in pairs and pairs['iss'] != [GOOGLE_ISSUER]:
+            return {**result, 'stage': 'ISSUER'}
+        if has_error:
+            return {**result, 'stage': 'CONSENT' if pairs.get('error') != [''] else 'ERROR_CORE'}
+        if not all(name in pairs and pairs[name] != [''] for name in _SUCCESS):
+            return {**result, 'stage': 'SUCCESS_CORE'}
         if pairs.get('scope') != [SCOPE]:
             return {**result, 'stage': 'SCOPE'}
         if pairs.get('picked_file_ids') != [self.binding.file_id]:
@@ -123,9 +136,9 @@ class PkceFlow:
                     if flow.callback_diagnostic is None:
                         flow.callback_diagnostic = {'stage': 'HTTP_HEADER',
                                                     'known_present': {'code': False, 'state': False, 'scope': False,
-                                                                      'picked_file_ids': False, 'error': False},
+                                                                      'picked_file_ids': False, 'error': False, 'iss': False},
                                                     'known_duplicate': {'code': False, 'state': False, 'scope': False,
-                                                                        'picked_file_ids': False, 'error': False},
+                                                                        'picked_file_ids': False, 'error': False, 'iss': False},
                                                     'unknown_field_count': 0}
                     received['error'] = str(exc) if type(exc) is Denied else 'CALLBACK_INVALID'
                     self.send_response(400)
