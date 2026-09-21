@@ -53,7 +53,10 @@ class Provider:
             return {'id': self.b.file_id, 'mimeType': MIME, 'version': self.version,
                     'modifiedTime': '2026-09-21T10:00:00Z', 'trashed': False, 'isAppAuthorized': True}
         if operation in {'docs_before', 'docs_after'}:
-            return {'documentId': self.b.file_id, 'revisionId': 'rev1'}
+            value = copy.deepcopy(self.body)
+            if 'revisionId' in value:
+                value['revisionId'] = 'rev1'
+            return value
         if operation == 'body':
             if self.on_body:
                 self.on_body()
@@ -83,6 +86,34 @@ class SessionSafety(unittest.TestCase):
 
     def test_missing_drive_version_cannot_succeed(self):
         self.provider.version = None
+        self.assert_no_success(self.session.read_once)
+
+    def test_reader_without_revision_uses_three_responses_and_drive_version(self):
+        del self.provider.body['revisionId']
+        result = self.session.read_once()
+        self.assertEqual('SUCCESS', result['receipt']['status'])
+        self.assertIsNone(result['content']['revision_id'])
+        self.assertEqual('NOT_RETURNED', result['receipt']['docs_revision_status'])
+        self.assertEqual('DRIVE_VERSION_AND_DOCS_RESPONSE_DIGEST', result['receipt']['consistency_basis'])
+        self.assertEqual('UNKNOWN', result['receipt']['provider_atomicity'])
+        self.assertEqual(6, len(self.provider.calls))
+
+    def test_reader_response_change_with_same_drive_version_is_rejected(self):
+        del self.provider.body['revisionId']
+        self.provider.on_body = lambda: self.provider.body.update(title='Changed after first response')
+        self.assert_no_success(self.session.read_once)
+
+    def test_reader_drive_version_change_is_rejected(self):
+        del self.provider.body['revisionId']
+        self.provider.on_body = lambda: setattr(self.provider, 'version', '8')
+        self.assert_no_success(self.session.read_once)
+
+    def test_revision_availability_change_is_rejected(self):
+        self.provider.on_body = lambda: self.provider.body.pop('revisionId')
+        self.assert_no_success(self.session.read_once)
+
+    def test_null_revision_is_not_treated_as_absent(self):
+        self.provider.body['revisionId'] = None
         self.assert_no_success(self.session.read_once)
 
     def test_invalid_child_tab_cannot_be_full(self):

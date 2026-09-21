@@ -21,10 +21,14 @@ def _drive(value, binding):
     return {'version': value['version'], 'modified_at': value['modifiedTime']}
 
 def _docs(value, binding):
-    require(type(value) is dict and set(value) == {'documentId', 'revisionId'}, 'PROVIDER_RESPONSE_INVALID')
-    require(value['documentId'] == binding.file_id and type(value['revisionId']) is str
-            and 0 < len(value['revisionId']) <= 2048, 'REVISION_UNAVAILABLE')
-    return value['revisionId']
+    require(type(value) is dict and value.get('documentId') == binding.file_id, 'RESOURCE_BINDING_MISMATCH')
+    # Google only exposes revisionId to users with edit access. Absence is
+    # allowed only with three equal complete responses and stable Drive version.
+    if 'revisionId' not in value:
+        return None
+    revision = value['revisionId']
+    require(type(revision) is str and 0 < len(revision) <= 2048, 'REVISION_UNAVAILABLE')
+    return revision
 
 def _coverage(body, binding):
     require(type(body) is dict and body.get('documentId') == binding.file_id, 'RESOURCE_BINDING_MISMATCH')
@@ -183,11 +187,19 @@ class ConnectorSession:
             require(type(user) is dict and user.get('emailAddress') == self.binding.subject_email
                     and user.get('permissionId') == self.binding.subject_permission_id, 'IDENTITY_MISMATCH')
             m0 = _drive(self._read('drive_before', token), self.binding)
-            d0 = _docs(self._read('docs_before', token), self.binding)
+            before = self._read('docs_before', token)
+            d0 = _docs(before, self.binding)
             body = self._read('body', token)
-            d1 = _docs(self._read('docs_after', token), self.binding)
+            db = _docs(body, self.binding)
+            after = self._read('docs_after', token)
+            d1 = _docs(after, self.binding)
             m1 = _drive(self._read('drive_after', token), self.binding)
-            require(type(body) is dict and (m0, d0) == (m1, d1) and body.get('revisionId') == d0, 'VERSION_CHANGED')
+            require(m0 == m1 and d0 == db == d1, 'VERSION_CHANGED')
+            if d0 is None:
+                require(fingerprint(before) == fingerprint(body) == fingerprint(after), 'VERSION_CHANGED')
+                consistency_basis = 'DRIVE_VERSION_AND_DOCS_RESPONSE_DIGEST'
+            else:
+                consistency_basis = 'DRIVE_VERSION_AND_DOCS_REVISION'
             coverage, content = _coverage(body, self.binding)
             with self._lock, self.broker.synchronized():
                 self._check()
@@ -195,7 +207,9 @@ class ConnectorSession:
                 evidence = receipt(status, 'EXACT_READ_AS_OF' if status == 'SUCCESS' else 'COVERAGE_INCOMPLETE',
                     google_reads=6, credential_dereferences=1, content_delivered=False,
                     coverage=coverage, coverage_scope='SUPPORTED_DOCUMENT_TEXT', freshness='AS_OF',
-                    provider_atomicity='UNKNOWN', drive_version=m0['version'], docs_revision=d0)
+                    provider_atomicity='UNKNOWN', drive_version=m0['version'], docs_revision=d0,
+                    docs_revision_status='NOT_RETURNED' if d0 is None else 'AVAILABLE',
+                    consistency_basis=consistency_basis)
                 if content is not None:
                     content['read_at'] = evidence['observed_at']
                     evidence['content_digest'] = fingerprint(content)
