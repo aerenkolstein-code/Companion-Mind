@@ -115,4 +115,16 @@ class CliFlow(unittest.TestCase):
         code, receipt = self.run_cli('--content-out', str(self.output), 'read')
         self.assertEqual((code, receipt['status'], receipt['cleanup_remote_state']), (2, 'CLEANUP_INCOMPLETE', 'UNKNOWN'))
 
+    def test_explicit_revoke_remote_failure_is_nonzero(self):
+        self.assertEqual(self.run_cli('authorize')[0], 0)
+        Transport.mode = 'remote_cleanup_fails'
+        code, receipt = self.run_cli('revoke')
+        self.assertEqual((code, receipt['status'], receipt['remote_state']), (2, 'CLEANUP_INCOMPLETE', 'UNKNOWN'))
+
+    def test_explicit_revoke_delete_failure_is_nonzero(self):
+        self.assertEqual(self.run_cli('authorize')[0], 0)
+        self.store.fail_delete = True
+        code, receipt = self.run_cli('revoke')
+        self.assertEqual((code, receipt['status'], receipt['credential_deleted']), (2, 'CLEANUP_INCOMPLETE', False))
+
 if __name__ == '__main__': unittest.main()

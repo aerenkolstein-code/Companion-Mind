@@ -99,8 +99,10 @@ def main(argv=None):
             return 0
         session = ConnectorSession(binding, broker, transport)
         if args.command == 'revoke':
-            _emit(session.revoke())
-            return 0
+            cleanup = session.revoke()
+            _emit(cleanup)
+            return 0 if (cleanup['local_closed'] and cleanup['credential_deleted']
+                         and cleanup['remote_state'] == 'REVOKED') else 2
         result, cleanup, failure = None, None, None
         try:
             result = session.read_once()
