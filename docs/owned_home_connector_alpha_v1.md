@@ -24,13 +24,18 @@ identity check. It verifies the configured test email and records the observed
 Google permission ID in the explicit non-secret binding file. A binding that has
 not completed this enrollment cannot read.
 
-`read` performs one fixed six-GET transaction: identity, Drive M0, Docs D0,
-body, Docs D1, Drive M1. It has no caller-configurable URL, method, endpoint,
+`read` performs one fixed six-GET transaction: identity, Drive M0, full Docs
+D0, full Docs body, full Docs D1, Drive M1. It has no caller-configurable URL, method, endpoint,
 redirect, retry, refresh, list, search, or write operation. Each request has
 fixed Google hosts and paths, HTTPS, an eight-second connection timeout, a
 twelve-second response deadline, per-response two MiB cap, cumulative four MiB
 cap, and a forty-five-second read deadline. The body is released only when the
-principal, file, MIME, Drive version, Docs revision, and final local gate agree.
+principal, file, MIME, Drive version, Docs revision when reader-visible, and final local gate agree.
+Google Docs exposes `revisionId` only to editors. For the approved reader-only
+test account, a missing revision is handled honestly: D0, body, and D1 must
+have matching safe fingerprints while Drive M0/M1 versions match. That result
+is an `AS_OF` observation over this read window, not a claim of provider
+atomicity or of a current snapshot.
 The evidence receipt contains counters and status only; structured content is
 written solely to the operator's explicit `--content-out` local path.
 

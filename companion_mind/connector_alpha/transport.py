@@ -23,10 +23,10 @@ class GoogleTransport:
             'identity': ('www.googleapis.com', '/drive/v3/about', {'fields': 'user(emailAddress,permissionId)'}),
             'drive_before': ('www.googleapis.com', '/drive/v3/files/' + b.file_id, {'fields': META_FIELDS}),
             'docs_before': ('docs.googleapis.com', '/v1/documents/' + b.file_id,
-                         {'fields': 'documentId,revisionId', 'includeTabsContent': 'true'}),
+                         {'includeTabsContent': 'true'}),
             'body': ('docs.googleapis.com', '/v1/documents/' + b.file_id, {'includeTabsContent': 'true'}),
             'docs_after': ('docs.googleapis.com', '/v1/documents/' + b.file_id,
-                         {'fields': 'documentId,revisionId', 'includeTabsContent': 'true'}),
+                         {'includeTabsContent': 'true'}),
             'drive_after': ('www.googleapis.com', '/drive/v3/files/' + b.file_id, {'fields': META_FIELDS}),
         }
         if operation in routes:
