@@ -205,9 +205,17 @@ class CredentialBroker:
     def begin_read(self):
         with self.synchronized():
             require(not self.closed, 'LOCAL_AUTHORIZATION_CLOSED')
-            self.binding.active()
-            self.gate.require_active()
-            self.lifecycle.begin_read()
+            try:
+                self.binding.active()
+                self.gate.require_active()
+                self.lifecycle.begin_read()
+            except Exception:
+                self.closed = True
+                try:
+                    self.lifecycle.close()
+                except Exception:
+                    pass
+                raise
 
     def acquire(self):
         with self.synchronized():

@@ -93,6 +93,32 @@ class LifecycleTests(unittest.TestCase):
         self.assertTrue(self.broker.token_for_cleanup().startswith('SYNTHETIC_ONLY_'))
         self.assertTrue(self.broker.close_and_delete())
         self.assertIsNone(self.store.read_record(self.binding.credential_target))
+    def test_lock_before_first_read_closes_grant_no_unlock_revival(self):
+        self.install()
+        self.gate.locked = True
+        with self.assertRaisesRegex(Denied, 'SESSION_LOCKED_OR_UNAVAILABLE'):
+            self.broker.begin_read()
+        self.assertEqual('CLOSED', self.store.read_record(
+            self.binding.lifecycle_target, persist=2)['status'])
+        self.gate.locked = False
+        with self.assertRaises(Denied):
+            self.new_broker().begin_read()
+        self.assertTrue(self.broker.close_and_delete())
+    def test_binding_renewal_requires_clean_old_grant_and_new_installation(self):
+        self.install()
+        self.broker.close_and_delete()
+        renewed = replace(self.binding, expires_at='2099-02-01T00:00:00+00:00')
+        with self.assertRaisesRegex(Denied, 'LIFECYCLE_INVALID'):
+            CredentialBroker(renewed, self.store, self.gate).install_access_token(
+                'SYNTHETIC_ONLY_RENEWED_TEST_VALUE')
+        renewed = replace(renewed, installation='synthetic-renewed-install')
+        broker = CredentialBroker(renewed, self.store, self.gate)
+        broker.install_access_token('SYNTHETIC_ONLY_RENEWED_TEST_VALUE')
+        broker.begin_read()
+        self.assertEqual('SYNTHETIC_ONLY_RENEWED_TEST_VALUE', broker.acquire())
+        with self.assertRaises(Denied):
+            self.new_broker().begin_read()
+        self.assertTrue(broker.close_and_delete())
     def test_failed_delete_does_not_reopen_grant(self):
         self.install()
         self.store.fail_delete = True
