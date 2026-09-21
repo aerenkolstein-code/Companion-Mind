@@ -91,10 +91,29 @@ def main(argv=None):
                           google_reads=transport.counts['google_reads'], content_delivered=False))
             return 0
         session = ConnectorSession(binding, broker, transport)
-        result = session.read_once() if args.command == 'read' else {'receipt': session.revoke()}
-        if args.command == 'read' and result['receipt']['status'] == 'SUCCESS':
-            _write_content(args.content_out, result['content'])
-            result['receipt']['content_output'] = 'WRITTEN_EXPLICIT_LOCAL_PATH'
+        if args.command == 'revoke':
+            _emit(session.revoke())
+            return 0
+        result, cleanup, failure = None, None, None
+        try:
+            result = session.read_once()
+            if result['receipt']['status'] == 'SUCCESS':
+                session.deliver(result, lambda content: _write_content(args.content_out, content))
+                result['receipt']['content_output'] = 'WRITTEN_EXPLICIT_LOCAL_PATH'
+        except Exception as exc:
+            failure = exc
+        finally:
+            cleanup = session.revoke()
+        if failure is not None:
+            code = str(failure) if type(failure) is Denied else 'CONNECTOR_FAILED_CLOSED'
+            _emit(receipt('BLOCKED', code, google_reads=transport.counts['google_reads'],
+                          content_delivered=False, cleanup_local_closed=cleanup['local_closed'],
+                          cleanup_remote_state=cleanup['remote_state'],
+                          cleanup_credential_deleted=cleanup['credential_deleted']))
+            return 2
+        result['receipt']['cleanup_local_closed'] = cleanup['local_closed']
+        result['receipt']['cleanup_remote_state'] = cleanup['remote_state']
+        result['receipt']['cleanup_credential_deleted'] = cleanup['credential_deleted']
         _emit(result['receipt'])
         return 0
     except Exception as exc:
