@@ -57,9 +57,11 @@ class PkceFlow:
         flow, received, done = self, {}, threading.Event()
         class Callback(BaseHTTPRequestHandler):
             def log_message(self, *_): return
+            def setup(self):
+                self.connection.settimeout(2)
+                super().setup()
             def do_GET(self):
                 try:
-                    self.connection.settimeout(2)
                     require(self.headers.get_all('Host') == ['127.0.0.1:%d' % flow.port]
                             and self.headers.get('Content-Length') in (None, '0')
                             and self.headers.get('Transfer-Encoding') is None

@@ -10,14 +10,19 @@ application, named Google subject, Windows SID, one file ID, expiry, and three
 explicit boundary confirmations. Unknown, mismatched, expired, or non-test
 bindings are refused before a credential is dereferenced.
 
-`authorize` launches the system browser for a desktop PKCE flow. The callback
+`authorize` binds its local loopback listener before it launches the system browser for a desktop PKCE flow. The callback
 is accepted only on the local loopback port with the original state, the exact
 `drive.file` scope, and the exact single Picker file ID. The authorization code
 and access token are never written to terminal output, receipts, logs, config,
 or repository files. A successful token exchange is written only to the
-current-user, session-persistent Windows Credential Manager target derived from
+current-user Credential Manager target derived from
 the full binding digest. There is no environment, plaintext file, cookie, or
 connector credential fallback.
+
+The first successful authorization also uses that same token for a fixed
+identity check. It verifies the configured test email and records the observed
+Google permission ID in the explicit non-secret binding file. A binding that has
+not completed this enrollment cannot read.
 
 `read` performs one fixed six-GET transaction: identity, Drive M0, Docs D0,
 body, Docs D1, Drive M1. It has no caller-configurable URL, method, endpoint,
@@ -29,6 +34,13 @@ principal, file, MIME, Drive version, Docs revision, and final local gate agree.
 The evidence receipt contains counters and status only; structured content is
 written solely to the operator's explicit `--content-out` local path.
 
+The operator flow is one manual `authorize`, one manual `read --content-out
+RESULT.json`, then automatic cleanup. Read delivery is a separate final gate:
+the content file is written only after the final grant/lifecycle check. Whether
+the read succeeds or fails, the command closes local authorization, attempts
+the one remote revoke, and deletes the dedicated credential; the receipt reports
+each cleanup state independently. A new read requires a new authorization.
+
 `revoke` closes the local session gate and attempts deletion of the dedicated
 Credential Manager target even if a credential is unavailable. When a token was
 already acquired for cleanup it makes one fixed Google revoke request. A remote
@@ -38,3 +50,16 @@ confirmation from unknown remote revocation.
 The legacy Owned Home synthetic runtime imports Unix `fcntl` and is not claimed
 Windows-compatible by this connector. Connector Alpha's package CLI is the
 actual Windows entrypoint; no claim is made for the legacy shell.
+
+## Current qualification evidence and limits
+
+The native synthetic canary (`tools/connector_alpha_native_probe.py`) has
+passed current-SID, active-console, Default input-desktop, session Credential
+Manager write/read/delete, one-use read lifecycle, fresh-process denial while a
+read is in progress, cleanup-only token access after closure, and wrong-SID
+rejection. It uses only generated test slots and reports zero Google calls.
+
+The physical Windows lock-screen check is **NOT RUN**. No real OAuth consent,
+Google document read, provider revocation, or real account/application/file
+binding has been run. The automated CLI and transport/session tests use fake
+Google responses and in-memory stores; they are not live-provider evidence.
