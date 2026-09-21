@@ -59,6 +59,9 @@ class PkceFlow:
             def log_message(self, *_): return
             def do_GET(self):
                 try:
+                    require(self.headers.get('Host') == '127.0.0.1:%d' % flow.port
+                            and self.headers.get('Content-Length') in (None, '0')
+                            and len(self.path.encode('ascii')) <= 4096, 'CALLBACK_INVALID')
                     received['code'] = flow.accept_callback('http://127.0.0.1:%d%s' % (flow.port, self.path))
                     self.send_response(204)
                 except Exception as exc:
