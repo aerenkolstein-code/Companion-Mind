@@ -111,6 +111,12 @@ class PkceFlow:
                             and self.headers.get('Content-Length') in (None, '0')
                             and self.headers.get('Transfer-Encoding') is None
                             and len(self.path.encode('ascii')) <= 4096, 'CALLBACK_INVALID')
+                    # Browsers commonly probe /favicon.ico. It is not an OAuth
+                    # result and must not consume the one callback opportunity.
+                    if urlparse(self.path).path != '/callback':
+                        self.send_response(404)
+                        self.end_headers()
+                        return
                     received['code'] = flow.accept_callback('http://127.0.0.1:%d%s' % (flow.port, self.path))
                     self.send_response(204)
                 except Exception as exc:
