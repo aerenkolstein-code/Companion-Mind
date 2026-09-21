@@ -46,7 +46,7 @@ class Binding:
     project_id: str
     app_name: str
     subject_email: str
-    subject_permission_id: str
+    subject_permission_id: str | None
     owner: str
     universe: str
     purpose: str
@@ -58,11 +58,15 @@ class Binding:
     revoke_project_grant_authorized: bool
 
     def __post_init__(self):
-        for name in ('installation', 'project_id', 'owner', 'universe', 'purpose', 'file_id',
-                     'subject_permission_id'):
+        for name in ('installation', 'project_id', 'owner', 'universe', 'purpose', 'file_id'):
             value = getattr(self, name)
             require(type(value) is str and re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_.-]{0,127}', value)
                     and value.upper() not in {'UNKNOWN', 'UNBOUND', 'NONE'}, 'BINDING_INVALID')
+        require(self.subject_permission_id is None or
+                (type(self.subject_permission_id) is str and
+                 re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_.-]{0,127}', self.subject_permission_id)
+                 and self.subject_permission_id.upper() not in {'UNKNOWN', 'UNBOUND', 'NONE'}),
+                'SUBJECT_INVALID')
         require(type(self.client_id) is str and re.fullmatch(
             r'[0-9]+-[a-z0-9]+\.apps\.googleusercontent\.com', self.client_id), 'CLIENT_INVALID')
         require(type(self.subject_email) is str and re.fullmatch(
@@ -79,8 +83,14 @@ class Binding:
         except (TypeError, ValueError):
             raise Denied('EXPIRY_INVALID') from None
 
-    def active(self):
+    def active(self, require_enrolled=True):
+        require(not require_enrolled or self.subject_permission_id is not None, 'ENROLLMENT_REQUIRED')
         require(datetime.now(timezone.utc) < datetime.fromisoformat(self.expires_at), 'BINDING_EXPIRED')
+
+    @property
+    def lifecycle_target(self):
+        return 'CompanionMind.ConnectorAlpha.Lifecycle.' + fingerprint(
+            {'installation': self.installation, 'windows_sid': self.windows_sid})
 
     @property
     def credential_target(self):

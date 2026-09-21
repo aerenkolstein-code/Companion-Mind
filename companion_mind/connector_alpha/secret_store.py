@@ -1,134 +1,250 @@
-"""Windows Credential Manager broker for Connector Alpha.
-
-There is intentionally no file, environment, browser-cookie, or connector
-fallback.  The only credential accepted by this module is an opaque JSON blob
-stored in the current Windows user's non-roaming Credential Manager session.
-"""
+"""Windows current-user secret storage; no plaintext or alternate credential fallback."""
 from __future__ import annotations
-
+from contextlib import contextmanager
 import ctypes
-from ctypes import wintypes
+from ctypes import wintypes as w
 import json
 import os
+from threading import RLock
+from .contract import Denied, exact_json, require
 
-from .contract import Denied, require
+PREFIX = 'CompanionMind.ConnectorAlpha.'
+MAX_BLOB = 2560
 
-_CRED_TYPE_GENERIC = 1
-_CRED_PERSIST_SESSION = 1
-_ERROR_NOT_FOUND = 1168
-_MAX_BLOB = 4096
+def _dll(name):
+    require(os.name == 'nt', 'WINDOWS_SECRETSTORE_REQUIRED')
+    return ctypes.WinDLL(name, use_last_error=True)
 
+def _fn(lib, name, args, result):
+    fn = getattr(lib, name)
+    fn.argtypes, fn.restype = args, result
+    return fn
 
-class _Credential(ctypes.Structure):
-    _fields_ = [('Flags', wintypes.DWORD), ('Type', wintypes.DWORD),
-                ('TargetName', wintypes.LPWSTR), ('Comment', wintypes.LPWSTR),
-                ('LastWritten', ctypes.c_byte * 8), ('CredentialBlobSize', wintypes.DWORD),
-                ('CredentialBlob', ctypes.POINTER(ctypes.c_byte)), ('Persist', wintypes.DWORD),
-                ('AttributeCount', wintypes.DWORD), ('Attributes', ctypes.c_void_p),
-                ('TargetAlias', wintypes.LPWSTR), ('UserName', wintypes.LPWSTR)]
-
-
-class WindowsCredentialStore:
-    """Small native store adapter. It deliberately refuses non-Windows hosts."""
-    def __init__(self, sid):
-        require(os.name == 'nt', 'WINDOWS_SECRETSTORE_REQUIRED')
-        self.sid = sid
-        self._advapi = ctypes.WinDLL('Advapi32.dll', use_last_error=True)
-        self._advapi.CredReadW.argtypes = [wintypes.LPCWSTR, wintypes.DWORD, wintypes.DWORD,
-                                           ctypes.POINTER(ctypes.POINTER(_Credential))]
-        self._advapi.CredReadW.restype = wintypes.BOOL
-        self._advapi.CredFree.argtypes = [ctypes.c_void_p]
-        self._advapi.CredDeleteW.argtypes = [wintypes.LPCWSTR, wintypes.DWORD, wintypes.DWORD]
-        self._advapi.CredDeleteW.restype = wintypes.BOOL
-        self._advapi.CredWriteW.argtypes = [ctypes.POINTER(_Credential), wintypes.DWORD]
-        self._advapi.CredWriteW.restype = wintypes.BOOL
-
-    def write_access_token(self, target, token):
-        require(type(token) is str and 1 <= len(token) <= 3072, 'CREDENTIAL_INVALID')
-        raw = json.dumps({'access_token': token}, separators=(',', ':')).encode('utf-8')
-        require(len(raw) <= _MAX_BLOB, 'CREDENTIAL_INVALID')
-        blob = (ctypes.c_byte * len(raw)).from_buffer_copy(raw)
-        credential = _Credential()
-        credential.Type, credential.TargetName = _CRED_TYPE_GENERIC, target
-        credential.CredentialBlobSize = len(raw)
-        credential.CredentialBlob = ctypes.cast(blob, ctypes.POINTER(ctypes.c_byte))
-        credential.Persist, credential.UserName = _CRED_PERSIST_SESSION, self.sid
-        if not self._advapi.CredWriteW(ctypes.byref(credential), 0):
-            raise Denied('SECRETSTORE_WRITE_FAILED')
-
-    def read(self, target):
-        ptr = ctypes.POINTER(_Credential)()
-        if not self._advapi.CredReadW(target, _CRED_TYPE_GENERIC, 0, ctypes.byref(ptr)):
-            code = ctypes.get_last_error()
-            raise Denied('CREDENTIAL_MISSING' if code == _ERROR_NOT_FOUND else 'SECRETSTORE_UNAVAILABLE')
+def current_sid():
+    k, a = _dll('kernel32'), _dll('advapi32')
+    process = _fn(k, 'GetCurrentProcess', [], w.HANDLE)()
+    open_token = _fn(a, 'OpenProcessToken', [w.HANDLE, w.DWORD, ctypes.POINTER(w.HANDLE)], w.BOOL)
+    info = _fn(a, 'GetTokenInformation', [w.HANDLE, ctypes.c_int, ctypes.c_void_p, w.DWORD, ctypes.POINTER(w.DWORD)], w.BOOL)
+    convert = _fn(a, 'ConvertSidToStringSidW', [ctypes.c_void_p, ctypes.POINTER(w.LPWSTR)], w.BOOL)
+    close = _fn(k, 'CloseHandle', [w.HANDLE], w.BOOL)
+    free = _fn(k, 'LocalFree', [ctypes.c_void_p], ctypes.c_void_p)
+    token, needed = w.HANDLE(), w.DWORD()
+    require(open_token(process, 8, ctypes.byref(token)), 'WINDOWS_IDENTITY_UNAVAILABLE')
+    try:
+        info(token, 1, None, 0, ctypes.byref(needed))
+        require(0 < needed.value <= 65536, 'WINDOWS_IDENTITY_UNAVAILABLE')
+        buf = ctypes.create_string_buffer(needed.value)
+        require(info(token, 1, buf, len(buf), ctypes.byref(needed)), 'WINDOWS_IDENTITY_UNAVAILABLE')
+        sid_ptr = ctypes.cast(buf, ctypes.POINTER(ctypes.c_void_p))[0]
+        result = w.LPWSTR()
+        require(convert(sid_ptr, ctypes.byref(result)), 'WINDOWS_IDENTITY_UNAVAILABLE')
         try:
-            record = ptr.contents
-            require(record.Persist == _CRED_PERSIST_SESSION and record.UserName == self.sid,
-                    'CREDENTIAL_BOUNDARY_DENIED')
-            require(0 < record.CredentialBlobSize <= _MAX_BLOB, 'CREDENTIAL_INVALID')
-            raw = ctypes.string_at(record.CredentialBlob, record.CredentialBlobSize)
-            try:
-                value = json.loads(raw.decode('utf-8'))
-            except (UnicodeError, ValueError):
-                raise Denied('CREDENTIAL_INVALID') from None
-            require(type(value) is dict and set(value) == {'access_token'}, 'CREDENTIAL_INVALID')
-            require(type(value['access_token']) is str and 1 <= len(value['access_token']) <= 3072,
-                    'CREDENTIAL_INVALID')
-            return value['access_token']
+            return result.value
         finally:
-            self._advapi.CredFree(ptr)
-
-    def delete(self, target):
-        if not self._advapi.CredDeleteW(target, _CRED_TYPE_GENERIC, 0):
-            code = ctypes.get_last_error()
-            if code != _ERROR_NOT_FOUND:
-                raise Denied('SECRETSTORE_DELETE_FAILED')
-
+            free(ctypes.cast(result, ctypes.c_void_p))
+    finally:
+        close(token)
 
 class SessionGate:
-    """Fail closed unless the caller is in the active Windows console session."""
-    def __init__(self):
-        require(os.name == 'nt', 'WINDOWS_SECRETSTORE_REQUIRED')
-        self._kernel = ctypes.WinDLL('Kernel32.dll', use_last_error=True)
-        self._wts = ctypes.WinDLL('Wtsapi32.dll', use_last_error=True)
+    """Actual SID/session and input-desktop checks at dispatch and delivery.
+    This is point-in-time gating, not continuous lock monitoring."""
+    def __init__(self, sid=None):
+        self.sid = sid if sid is not None else current_sid()
+        self.k, self.u = _dll('kernel32'), _dll('user32')
+        self.pid = _fn(self.k, 'GetCurrentProcessId', [], w.DWORD)
+        self.session = _fn(self.k, 'ProcessIdToSessionId', [w.DWORD, ctypes.POINTER(w.DWORD)], w.BOOL)
+        self.console = _fn(self.k, 'WTSGetActiveConsoleSessionId', [], w.DWORD)
+        self.open_desktop = _fn(self.u, 'OpenInputDesktop', [w.DWORD, w.BOOL, w.DWORD], w.HANDLE)
+        self.info = _fn(self.u, 'GetUserObjectInformationW', [w.HANDLE, ctypes.c_int, ctypes.c_void_p, w.DWORD, ctypes.POINTER(w.DWORD)], w.BOOL)
+        self.close_desktop = _fn(self.u, 'CloseDesktop', [w.HANDLE], w.BOOL)
+
+    def require_identity(self):
+        require(current_sid() == self.sid, 'WINDOWS_IDENTITY_MISMATCH')
 
     def require_active(self):
-        session = self._kernel.WTSGetActiveConsoleSessionId()
-        require(session != 0xFFFFFFFF, 'SESSION_LOCKED_OR_UNAVAILABLE')
-        # WTSConnectState: 0 is WTSActive. No best-effort alternative exists.
-        state = wintypes.DWORD()
-        buffer = ctypes.c_void_p()
-        size = wintypes.DWORD()
-        ok = self._wts.WTSQuerySessionInformationW(None, session, 8, ctypes.byref(buffer), ctypes.byref(size))
-        if not ok:
-            raise Denied('SESSION_LOCKED_OR_UNAVAILABLE')
+        self.require_identity()
+        session, needed = w.DWORD(), w.DWORD()
+        require(self.session(self.pid(), ctypes.byref(session)), 'SESSION_UNAVAILABLE')
+        console = self.console()
+        require(console != 0xFFFFFFFF and session.value == console, 'SESSION_UNAVAILABLE')
+        desktop = self.open_desktop(0, False, 1)
+        require(bool(desktop), 'SESSION_LOCKED_OR_UNAVAILABLE')
         try:
-            require(size.value >= ctypes.sizeof(state), 'SESSION_LOCKED_OR_UNAVAILABLE')
-            state = ctypes.cast(buffer, ctypes.POINTER(wintypes.DWORD)).contents.value
-            require(state == 0, 'SESSION_LOCKED_OR_UNAVAILABLE')
+            name = ctypes.create_unicode_buffer(256)
+            require(self.info(desktop, 2, name, ctypes.sizeof(name), ctypes.byref(needed))
+                    and name.value.lower() == 'default', 'SESSION_LOCKED_OR_UNAVAILABLE')
         finally:
-            self._wts.WTSFreeMemory(buffer)
+            self.close_desktop(desktop)
 
+class _Credential(ctypes.Structure):
+    _fields_ = [('Flags', w.DWORD), ('Type', w.DWORD), ('TargetName', w.LPWSTR),
+                ('Comment', w.LPWSTR), ('LastWritten', w.FILETIME),
+                ('CredentialBlobSize', w.DWORD), ('CredentialBlob', ctypes.POINTER(ctypes.c_byte)),
+                ('Persist', w.DWORD), ('AttributeCount', w.DWORD), ('Attributes', ctypes.c_void_p),
+                ('TargetAlias', w.LPWSTR), ('UserName', w.LPWSTR)]
+
+class WindowsCredentialStore:
+    def __init__(self, sid):
+        self.sid = sid
+        self.a, self.k = _dll('advapi32'), _dll('kernel32')
+        self._read = _fn(self.a, 'CredReadW', [w.LPCWSTR, w.DWORD, w.DWORD, ctypes.POINTER(ctypes.POINTER(_Credential))], w.BOOL)
+        self._write = _fn(self.a, 'CredWriteW', [ctypes.POINTER(_Credential), w.DWORD], w.BOOL)
+        self._delete = _fn(self.a, 'CredDeleteW', [w.LPCWSTR, w.DWORD, w.DWORD], w.BOOL)
+        self._free = _fn(self.a, 'CredFree', [ctypes.c_void_p], None)
+        self._create_mutex = _fn(self.k, 'CreateMutexW', [ctypes.c_void_p, w.BOOL, w.LPCWSTR], w.HANDLE)
+        self._wait = _fn(self.k, 'WaitForSingleObject', [w.HANDLE, w.DWORD], w.DWORD)
+        self._release = _fn(self.k, 'ReleaseMutex', [w.HANDLE], w.BOOL)
+        self._close = _fn(self.k, 'CloseHandle', [w.HANDLE], w.BOOL)
+
+    def _target(self, target):
+        require(type(target) is str and target.startswith(PREFIX) and len(target) <= 220
+                and all(c.isalnum() or c in '.-' for c in target), 'CREDENTIAL_TARGET_DENIED')
+        require(current_sid() == self.sid, 'WINDOWS_IDENTITY_MISMATCH')
+
+    @contextmanager
+    def mutex(self, target):
+        self._target(target)
+        handle = self._create_mutex(None, False, 'Global\\' + target)
+        require(bool(handle), 'LIFECYCLE_LOCK_UNAVAILABLE')
+        owned = False
+        try:
+            code = self._wait(handle, 20000)
+            owned = code in (0, 0x80)
+            require(code == 0, 'LIFECYCLE_LOCK_UNAVAILABLE')
+            yield
+        finally:
+            if owned:
+                self._release(handle)
+            self._close(handle)
+
+    def read_record(self, target, persist=1):
+        self._target(target)
+        ptr = ctypes.POINTER(_Credential)()
+        if not self._read(target, 1, 0, ctypes.byref(ptr)):
+            if ctypes.get_last_error() == 1168:
+                return None
+            raise Denied('SECRETSTORE_UNAVAILABLE')
+        try:
+            record = ptr.contents
+            require(record.Persist == persist and record.UserName == self.sid
+                    and record.TargetName == target and 0 < record.CredentialBlobSize <= MAX_BLOB,
+                    'CREDENTIAL_BOUNDARY_DENIED')
+            return exact_json(ctypes.string_at(record.CredentialBlob, record.CredentialBlobSize))
+        finally:
+            if ptr and ptr.contents.CredentialBlob and ptr.contents.CredentialBlobSize <= MAX_BLOB:
+                ctypes.memset(ptr.contents.CredentialBlob, 0, ptr.contents.CredentialBlobSize)
+            self._free(ptr)
+
+    def write_record(self, target, value, persist=1):
+        self._target(target)
+        require(persist in (1, 2), 'CREDENTIAL_PERSISTENCE_DENIED')
+        raw = json.dumps(value, ensure_ascii=True, separators=(',', ':'), allow_nan=False).encode('ascii')
+        require(0 < len(raw) <= MAX_BLOB, 'CREDENTIAL_LIMIT')
+        blob = (ctypes.c_byte * len(raw)).from_buffer_copy(raw)
+        record = _Credential()
+        record.Type, record.TargetName, record.UserName, record.Persist = 1, target, self.sid, persist
+        record.CredentialBlobSize = len(raw)
+        record.CredentialBlob = ctypes.cast(blob, ctypes.POINTER(ctypes.c_byte))
+        try:
+            require(self._write(ctypes.byref(record), 0), 'SECRETSTORE_WRITE_FAILED')
+        finally:
+            ctypes.memset(blob, 0, len(raw))
+
+    def write_access_token(self, target, token):
+        require(type(token) is str and 20 <= len(token) <= 2048
+                and all(33 <= ord(c) <= 126 for c in token), 'CREDENTIAL_INVALID')
+        self.write_record(target, {'access_token': token})
+
+    def read(self, target):
+        value = self.read_record(target)
+        require(value is not None, 'CREDENTIAL_MISSING')
+        require(type(value) is dict and set(value) == {'access_token'}, 'CREDENTIAL_INVALID')
+        token = value['access_token']
+        require(type(token) is str and 20 <= len(token) <= 2048
+                and all(33 <= ord(c) <= 126 for c in token), 'CREDENTIAL_INVALID')
+        return token
+
+    def delete(self, target):
+        self._target(target)
+        if not self._delete(target, 1, 0):
+            require(ctypes.get_last_error() == 1168, 'SECRETSTORE_DELETE_FAILED')
+        require(self.read_record(target) is None, 'SECRETSTORE_DELETE_FAILED')
 
 class CredentialBroker:
-    """One binding, one current-session slot, with an injectable test gate."""
     def __init__(self, binding, store=None, gate=None):
+        from .lifecycle import Lifecycle
         self.binding = binding
         self.store = store if store is not None else WindowsCredentialStore(binding.windows_sid)
-        self.gate = gate if gate is not None else SessionGate()
-        self.closed = False
+        self.gate = gate if gate is not None else SessionGate(binding.windows_sid)
+        self.closed, self._lock = False, RLock()
+        self.lifecycle = Lifecycle(binding, self.store)
+
+    @contextmanager
+    def synchronized(self):
+        with self._lock, self.store.mutex(self.binding.lifecycle_target):
+            yield
+
+    def _active(self):
+        require(not self.closed, 'LOCAL_AUTHORIZATION_CLOSED')
+        try:
+            self.binding.active()
+            self.gate.require_active()
+            self.lifecycle.check_read()
+        except Exception:
+            self.closed = True
+            try:
+                self.lifecycle.close()
+            except Exception:
+                pass
+            raise
+
+    def assert_active(self):
+        with self.synchronized():
+            self._active()
+
+    def begin_read(self):
+        with self.synchronized():
+            require(not self.closed, 'LOCAL_AUTHORIZATION_CLOSED')
+            self.binding.active()
+            self.gate.require_active()
+            self.lifecycle.begin_read()
 
     def acquire(self):
-        require(not self.closed, 'LOCAL_AUTHORIZATION_CLOSED')
-        self.gate.require_active()
-        self.binding.active()
-        return self.store.read(self.binding.credential_target)
+        with self.synchronized():
+            self._active()
+            return self.store.read(self.binding.credential_target)
 
-    def install_access_token(self, token):
-        require(not self.closed, 'LOCAL_AUTHORIZATION_CLOSED')
-        self.gate.require_active()
-        self.store.write_access_token(self.binding.credential_target, token)
+    def install_access_token(self, token, expires_in=3600):
+        with self.synchronized():
+            require(not self.closed, 'LOCAL_AUTHORIZATION_CLOSED')
+            self.binding.active()
+            self.gate.require_active()
+            self.lifecycle.prepare(expires_in)
+            try:
+                self.store.write_access_token(self.binding.credential_target, token)
+                self.lifecycle.activate()
+            except Exception:
+                self.closed = True
+                try:
+                    self.lifecycle.close()
+                finally:
+                    self.store.delete(self.binding.credential_target)
+                raise
+
+    def close_local(self):
+        self.closed = True
+        with self.synchronized():
+            self.lifecycle.close()
+
+    def token_for_cleanup(self):
+        require(self.closed, 'CLEANUP_REQUIRES_LOCAL_CLOSE')
+        with self.synchronized():
+            return self.store.read(self.binding.credential_target)
 
     def close_and_delete(self):
-        self.closed = True
-        self.store.delete(self.binding.credential_target)
+        try:
+            self.close_local()
+        finally:
+            with self.synchronized():
+                self.store.delete(self.binding.credential_target)
+        return True
