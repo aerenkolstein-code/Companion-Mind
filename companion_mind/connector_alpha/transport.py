@@ -27,13 +27,20 @@ class GoogleTransport:
 
     def _provider_failure(self, operation, response):
         """Keep only fixed error metadata; response bytes never cross this boundary."""
-        code, hint, size, chunks = 'UNKNOWN', 'UNCLASSIFIED', 0, []
+        code, hint, size, chunks, started = 'UNKNOWN', 'UNCLASSIFIED', 0, [], time.monotonic()
         try:
             while True:
+                if time.monotonic() - started >= 12:
+                    chunks = []
+                    break
                 chunk = response.read1(4096)
                 if not chunk:
                     break
                 size += len(chunk)
+                self.bytes += len(chunk)
+                if self.bytes > 4_194_304:
+                    chunks = []
+                    break
                 if size > ERROR_BYTES:
                     chunks = []
                     break

@@ -28,14 +28,24 @@ class TokenErrorDiagnostics(unittest.TestCase):
         self.assertNotIn(secret, json.dumps(diagnostic))
 
     def test_unknown_or_malformed_error_body_fails_closed(self):
-        for body, kind in ((b'{"error":"not-allowlisted"}', 'application/json'),
-                           (b'SYNTHETIC_SECRET_NOT_JSON', 'text/plain')):
+        for body, kind, expected in ((b'{"error":"not-allowlisted"}', 'application/json', 'UNKNOWN'),
+                                     (b'SYNTHETIC_SECRET_NOT_JSON', 'text/plain', 'UNKNOWN'),
+                                     (b'{"error":{"nested":"SYNTHETIC_SECRET"}}', 'application/json', 'UNKNOWN'),
+                                     (b'{"error":"invalid_request","error_description":42}', 'application/json', 'invalid_request'),
+                                     (b'SYNTHETIC_SECRET_' * 2000, 'application/json', 'UNKNOWN')):
             with self.subTest(kind=kind):
                 self.transport = GoogleTransport(binding())
                 FakeTLS.responses = [Response(500, body, kind)]
                 with self.assertRaisesRegex(Denied, 'PROVIDER_ERROR'): self.exchange()
-                self.assertEqual(self.transport.last_provider_diagnostic['google_error'], 'UNKNOWN')
+                self.assertEqual(self.transport.last_provider_diagnostic['google_error'], expected)
+                self.assertEqual(self.transport.last_provider_diagnostic['detail_hint'], 'UNCLASSIFIED')
                 self.assertNotIn('SYNTHETIC_SECRET', json.dumps(self.transport.last_provider_diagnostic))
+
+    def test_error_response_deadline_stops_diagnostic_body_read(self):
+        response = Response(500, b'{"error":"invalid_grant"}')
+        with patch('companion_mind.connector_alpha.transport.time.monotonic', side_effect=(0, 13)):
+            self.transport._provider_failure('exchange', response)
+        self.assertEqual(self.transport.last_provider_diagnostic['google_error'], 'UNKNOWN')
 
     def test_exact_allowlisted_description_is_classified_without_echo(self):
         FakeTLS.responses = [Response(400, json.dumps({'error': 'invalid_request',
