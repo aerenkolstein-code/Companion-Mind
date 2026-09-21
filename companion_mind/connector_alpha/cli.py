@@ -121,6 +121,11 @@ def main(argv=None):
         result['receipt']['cleanup_local_closed'] = cleanup['local_closed']
         result['receipt']['cleanup_remote_state'] = cleanup['remote_state']
         result['receipt']['cleanup_credential_deleted'] = cleanup['credential_deleted']
+        if not (cleanup['local_closed'] and cleanup['credential_deleted'] and cleanup['remote_state'] == 'REVOKED'):
+            result['receipt']['status'] = 'CLEANUP_INCOMPLETE'
+            result['receipt']['reason'] = 'CLEANUP_PARTIAL'
+            _emit(result['receipt'])
+            return 2
         _emit(result['receipt'])
         return 0
     except Exception as exc:

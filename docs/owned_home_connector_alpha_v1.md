@@ -63,3 +63,29 @@ The physical Windows lock-screen check is **NOT RUN**. No real OAuth consent,
 Google document read, provider revocation, or real account/application/file
 binding has been run. The automated CLI and transport/session tests use fake
 Google responses and in-memory stores; they are not live-provider evidence.
+
+## Manual operator sequence
+
+Create a non-secret binding JSON with the dedicated client and test file. The
+initial enrollment value is explicitly `null`; it is not a substitute ID:
+
+```json
+{"installation":"owned-home-win","client_id":"123-example.apps.googleusercontent.com","project_id":"dedicated-test-project","app_name":"Connector Alpha","subject_email":"approved-test@example.invalid","subject_permission_id":null,"owner":"owned-home","universe":"owned-home","purpose":"p3s2-single-read","file_id":"approved-single-file-id","windows_sid":"S-1-5-...","expires_at":"2026-12-31T23:59:59+00:00","dedicated_test_app":true,"non_sensitive_test_file":true,"revoke_project_grant_authorized":true}
+```
+
+From the repository root on the designated Windows host, use only manual
+commands. The first command opens the system browser after the loopback listener
+has bound; it enrolls the observed permission ID into the same non-secret JSON.
+
+```powershell
+python -m companion_mind.connector_alpha.cli --config .\connector-alpha-binding.json authorize
+python -m companion_mind.connector_alpha.cli --config .\connector-alpha-binding.json --content-out .\connector-alpha-result.json read
+python -m companion_mind.connector_alpha.cli --config .\connector-alpha-binding.json revoke
+```
+
+The access token is session-only in Credential Manager. The lifecycle ledger is
+non-secret but persistent in a separate Credential Manager slot so a crash or
+second process cannot resume a consumed read grant. The `read` command already
+performs cleanup; `revoke` is the manual recovery command when a prior command
+did not finish cleanup. Do not copy authorization codes, callback URLs, tokens,
+or browser cookies into the terminal or config file.

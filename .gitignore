@@ -1,14 +1,2 @@
-__pycache__/
-*.py[cod]
-.venv/
-.pytest_cache/
-.coverage
-build/
-*.egg-info/
-.DS_Store
-/private/
-/raw/
-/l0/
-/personal/
-/credentials/
-*.env
+/tests/.ca_cli_scratch/
+/ca-cli-*/
