@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+from dataclasses import asdict, replace
 import json
 import os
 import sys
@@ -34,6 +35,18 @@ def _write_content(path, value):
     finally:
         if os.path.exists(temporary): os.unlink(temporary)
 
+def _write_binding(path, binding):
+    parent = os.path.dirname(os.path.abspath(path))
+    require(os.path.isfile(path) and os.path.isdir(parent), 'BINDING_OUTPUT_PATH_INVALID')
+    fd, temporary = tempfile.mkstemp(prefix='connector-alpha-binding-', dir=parent)
+    try:
+        with os.fdopen(fd, 'w', encoding='utf-8', newline='\n') as stream:
+            json.dump(asdict(binding), stream, sort_keys=True, separators=(',', ':'))
+            stream.flush(); os.fsync(stream.fileno())
+        os.replace(temporary, path)
+    finally:
+        if os.path.exists(temporary): os.unlink(temporary)
+
 
 def main(argv=None):
     parser = argparse.ArgumentParser(prog='connector-alpha')
@@ -47,19 +60,33 @@ def main(argv=None):
         binding = Binding.load(args.config)
         broker, transport = CredentialBroker(binding), GoogleTransport(binding)
         if args.command == 'authorize':
+            token, installed = None, False
             flow = PkceFlow(binding, args.port)
             listener = flow.bind_listener()
             if webbrowser.open(flow.authorization_url) is not True:
                 raise Denied('SYSTEM_BROWSER_UNAVAILABLE')
-            code = flow.await_callback(listener)
-            response = transport.exchange_code(code, flow.verifier, flow.redirect_uri)
-            token = response.get('access_token') if type(response) is dict else None
-            require(type(response) is dict and response.get('scope') == SCOPE
-                    and response.get('token_type') == 'Bearer'
-                    and type(response.get('expires_in')) is int and 1 <= response['expires_in'] <= 3600
-                    and type(token) is str and 20 <= len(token) <= 3072, 'TOKEN_RESPONSE_INVALID')
-            broker.install_access_token(token)
-            token = code = None
+            try:
+                code = flow.await_callback(listener)
+                response = transport.exchange_code(code, flow.verifier, flow.redirect_uri)
+                token = response.get('access_token') if type(response) is dict else None
+                require(type(response) is dict and response.get('scope') == SCOPE
+                        and response.get('token_type') == 'Bearer'
+                        and type(response.get('expires_in')) is int and 1 <= response['expires_in'] <= 3600
+                        and type(token) is str and 20 <= len(token) <= 2048, 'TOKEN_RESPONSE_INVALID')
+                identity = transport.read('identity', token).get('user')
+                require(type(identity) is dict and identity.get('emailAddress') == binding.subject_email
+                        and type(identity.get('permissionId')) is str and identity['permissionId'], 'IDENTITY_MISMATCH')
+                require(binding.subject_permission_id in (None, identity['permissionId']), 'IDENTITY_MISMATCH')
+                enrolled = replace(binding, subject_permission_id=identity['permissionId'])
+                _write_binding(args.config, enrolled)
+                broker = CredentialBroker(enrolled)
+                broker.install_access_token(token, response['expires_in'])
+                installed = True
+            finally:
+                if token is not None and not installed:
+                    try: transport.revoke(token)
+                    except Exception: pass
+                token = code = None
             _emit(receipt('AUTHORIZED', 'LOCAL_SESSION_CREDENTIAL_STORED', oauth_exchanges=transport.counts['oauth_exchanges'],
                           google_reads=transport.counts['google_reads'], content_delivered=False))
             return 0
