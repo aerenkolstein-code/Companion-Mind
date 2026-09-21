@@ -55,10 +55,12 @@ class PkceFlow:
     def bind_listener(self):
         """Bind exactly one loopback listener before opening the browser."""
         flow, received, done = self, {}, threading.Event()
+        class QuietServer(HTTPServer):
+            def handle_error(self, *_): return
         class Callback(BaseHTTPRequestHandler):
             def log_message(self, *_): return
             def setup(self):
-                self.connection.settimeout(2)
+                self.request.settimeout(2)
                 super().setup()
             def do_GET(self):
                 try:
@@ -72,7 +74,7 @@ class PkceFlow:
                     received['error'] = str(exc) if type(exc) is Denied else 'CALLBACK_INVALID'
                     self.send_response(400)
                 self.end_headers()
-        server = HTTPServer(('127.0.0.1', self.port), Callback); server.timeout = .2
+        server = QuietServer(('127.0.0.1', self.port), Callback); server.timeout = .2
         def serve():
             while not done.is_set() and not received: server.handle_request()
         thread = threading.Thread(target=serve, daemon=True); thread.start()
