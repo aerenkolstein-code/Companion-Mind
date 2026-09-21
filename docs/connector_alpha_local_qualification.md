@@ -2,7 +2,7 @@
 
 Work order: CA-01, Windows manual single-document read connector.
 Reviewed: 2026-09-21. Code under test:
-`b368feb4e8da67faaf0e6c6bf6c8159cd73c24e0`.
+`b2be11b3f906916b2668181e94c2ce8d341fda6d` (reader compatibility follow-up).
 
 The bounded implementation and the executed local checks pass. **The work order
 and Connector Alpha stage remain open pending live validation.** This report is
@@ -26,23 +26,31 @@ or simulated success alone does not meet those criteria.
 ## Executed checks
 
 - `python -m unittest discover -s tests -p 'test_connector_alpha_*.py' -v`:
-  **42 tests passed**, with fake Google responses, no Google network calls and
+  **47 tests passed**, with fake Google responses, no Google network calls and
   in-memory credential fixtures. Loopback tests use an actual localhost server.
 - `python tools/connector_alpha_native_probe.py`: **passed** on Windows build
   10.0.26200, using generated synthetic values and dedicated disposable slots.
   Actual SID/session/desktop checks, native Credential Manager write/read/delete,
   cross-process consumed-grant denial, cleanup access and wrong-SID rejection
   passed. Both generated token and ledger slots were removed and absence checked.
+  This native run used the preceding `b368feb` code; the reader follow-up changes
+  response handling and transport query projection, not native secret storage.
 - Reviewed fixes: explicit revoke reports failure through its exit code; a gate
   failure before the first read persists closure; changed binding renewal has a
   documented, tested clean new-installation procedure. See
   [binding renewal](connector_alpha_binding_renewal.md).
+- Reader compatibility: Google only returns Docs `revisionId` to users with edit
+  access. The reader path retains read-only access and requires identical complete
+  D0/body/D1 response fingerprints plus matching Drive version metadata within
+  the same six-GET and response budgets. Evidence labels the absent revision
+  `NOT_RETURNED` and atomicity `UNKNOWN`. Drift and inconsistent revision presence
+  are rejected. [Google Docs API reference](https://developers.google.com/workspace/docs/api/reference/rest/v1/documents).
 
 ## Unverified and excluded
 
 Physical Windows lock/unlock, real OAuth consent, Google document reading,
 provider revocation and propagation remain **NOT RUN**. The live path waits for
-explicit scope confirmation and user consent. A browser login or local storage
+user consent following explicit scope approval. A browser login or local storage
 of a client configuration is not live-provider qualification.
 
 The legacy Unix shell is not claimed Windows-compatible. Windows user/admin
