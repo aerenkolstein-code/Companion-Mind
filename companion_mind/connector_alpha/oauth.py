@@ -21,6 +21,7 @@ class PkceFlow:
         self.binding, self.port = binding, port
         self.state, self.verifier = _token(32), _token(64)
         self.used = False
+        self.callback_diagnostic = None
         self.redirect_uri = 'http://127.0.0.1:%d/callback' % port
 
     @property
@@ -34,6 +35,7 @@ class PkceFlow:
         return 'https://accounts.google.com/o/oauth2/v2/auth?' + urlencode(params)
 
     def accept_callback(self, callback_url):
+        self.callback_diagnostic = self.diagnose_callback(callback_url)
         require(self.used is False, 'CALLBACK_REPLAYED')
         parsed = urlparse(callback_url)
         require(parsed.scheme == 'http' and parsed.hostname == '127.0.0.1' and parsed.port == self.port
@@ -50,7 +52,48 @@ class PkceFlow:
         code = query['code'][0]
         require(20 <= len(code) <= 2048 and all(ord(c) >= 33 for c in code), 'AUTHORIZATION_CODE_INVALID')
         self.used = True
+        self.callback_diagnostic = {'stage': 'ACCEPTED', 'known_present': {'code': True, 'state': True,
+                                    'scope': True, 'picked_file_ids': True, 'error': False},
+                                    'known_duplicate': {'code': False, 'state': False, 'scope': False,
+                                                        'picked_file_ids': False, 'error': False},
+                                    'unknown_field_count': 0}
         return code
+
+    def diagnose_callback(self, callback_url):
+        """Return only a bounded, non-secret callback failure projection."""
+        names = ('code', 'state', 'scope', 'picked_file_ids', 'error')
+        empty = {'stage': 'URL_PARSE', 'known_present': {name: False for name in names},
+                 'known_duplicate': {name: False for name in names}, 'unknown_field_count': 0}
+        try:
+            parsed = urlparse(callback_url)
+            if not (parsed.scheme == 'http' and parsed.hostname == '127.0.0.1' and parsed.port == self.port):
+                return {**empty, 'stage': 'HTTP_ORIGIN'}
+            if parsed.path != '/callback' or parsed.fragment:
+                return {**empty, 'stage': 'HTTP_PATH'}
+            pairs = parse_qs(parsed.query, keep_blank_values=True, strict_parsing=True)
+        except Exception:
+            return empty
+        present = {name: name in pairs for name in names}
+        duplicate = {name: len(pairs.get(name, ())) > 1 for name in names}
+        unknown = sum(1 for name in pairs if name not in names)
+        result = {'stage': 'QUERY_SHAPE', 'known_present': present,
+                  'known_duplicate': duplicate, 'unknown_field_count': unknown}
+        if self.used:
+            return {**result, 'stage': 'REPLAY'}
+        if unknown or any(duplicate.values()) or set(pairs) not in ({'code', 'state', 'scope', 'picked_file_ids'}, {'error', 'state'}):
+            return result
+        if pairs.get('state') != [self.state]:
+            return {**result, 'stage': 'STATE'}
+        if 'error' in pairs:
+            return {**result, 'stage': 'CONSENT'}
+        if pairs.get('scope') != [SCOPE]:
+            return {**result, 'stage': 'SCOPE'}
+        if pairs.get('picked_file_ids') != [self.binding.file_id]:
+            return {**result, 'stage': 'PICKER_FILE'}
+        code = pairs.get('code', [''])[0]
+        if not (20 <= len(code) <= 2048 and all(ord(c) >= 33 for c in code)):
+            return {**result, 'stage': 'CODE'}
+        return {**result, 'stage': 'ACCEPTED'}
 
     def bind_listener(self):
         """Bind exactly one loopback listener before opening the browser."""
@@ -71,6 +114,13 @@ class PkceFlow:
                     received['code'] = flow.accept_callback('http://127.0.0.1:%d%s' % (flow.port, self.path))
                     self.send_response(204)
                 except Exception as exc:
+                    if flow.callback_diagnostic is None:
+                        flow.callback_diagnostic = {'stage': 'HTTP_HEADER',
+                                                    'known_present': {'code': False, 'state': False, 'scope': False,
+                                                                      'picked_file_ids': False, 'error': False},
+                                                    'known_duplicate': {'code': False, 'state': False, 'scope': False,
+                                                                        'picked_file_ids': False, 'error': False},
+                                                    'unknown_field_count': 0}
                     received['error'] = str(exc) if type(exc) is Denied else 'CALLBACK_INVALID'
                     self.send_response(400)
                 self.end_headers()

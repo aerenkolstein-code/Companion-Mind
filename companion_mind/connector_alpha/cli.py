@@ -55,7 +55,7 @@ def main(argv=None):
     parser.add_argument('--content-out')
     parser.add_argument('command', choices=('authorize', 'read', 'revoke'))
     args = parser.parse_args(argv)
-    transport = None
+    transport = flow = None
     try:
         binding = Binding.load(args.config)
         broker, transport = CredentialBroker(binding), GoogleTransport(binding)
@@ -135,7 +135,8 @@ def main(argv=None):
         counts = transport.counts if transport is not None else {}
         _emit(receipt('BLOCKED', code, google_reads=counts.get('google_reads', 'UNKNOWN'),
                       oauth_exchanges=counts.get('oauth_exchanges', 'UNKNOWN'), content_delivered=False,
-                      authorization_cleanup_remote_state=getattr(transport, 'cleanup_remote_state', 'NOT_APPLICABLE')))
+                      authorization_cleanup_remote_state=getattr(transport, 'cleanup_remote_state', 'NOT_APPLICABLE'),
+                      callback_diagnostic=getattr(flow, 'callback_diagnostic', None)))
         return 2
 
 
