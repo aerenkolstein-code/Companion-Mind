@@ -54,5 +54,16 @@ class S3Policy(unittest.TestCase):
         self.c.revoke_local()
         with self.assertRaisesRegex(Denied, 'DISPATCH_DENIED'): self.c.dispatch('pending', epoch)
 
+    def test_malformed_operations_and_inconsistent_counters_fail_closed(self):
+        self.store.raw['operations']['broken'] = 1
+        with self.assertRaisesRegex(Denied, 'RECOVERY_REQUIRED'): self.c.recover()
+        self.store.raw['operations'] = {}
+        self.store.raw['api_total'] = 1
+        with self.assertRaisesRegex(Denied, 'RECOVERY_REQUIRED'): self.c.recover()
+
+    def test_malformed_container_fails_closed(self):
+        self.store.raw['writes'] = None
+        with self.assertRaisesRegex(Denied, 'RECOVERY_REQUIRED'): self.c.recover()
+
 
 if __name__ == '__main__': unittest.main()

@@ -31,15 +31,36 @@ ordinary 168 split 30/50/40/28/20, safety 72 split 40/12/4/16, OAuth 4, refresh
 
 Unknown dispatches remain charged and cannot replay. A `PREPARED` or
 `DISPATCHED` operation after restart requires recovery rather than reuse. Local
-revocation increments a persistent epoch and blocks every future reservation.
+revocation increments a persistent epoch and blocks business reservations;
+only the explicitly tagged revoke cleanup request remains admissible.
+
+## Native persistence slice
+
+The S3 namespace now uses Windows Credential Manager with machine-persistent,
+current-user records. No S2 target is admitted. The non-secret disk ledger is
+paired with a native sequence/hash witness bound to its stage and absolute path.
+A native PREPARED witness precedes file replacement; COMMITTED is saved only
+after file readback. Interrupted, missing, mismatched, or stale disk state fails
+closed. A named Windows mutex encloses Controller read/modify/write operations.
+The witness does not protect against an administrator or a same-user adversary
+restoring both native credentials and disk together.
+
+Reservation and every counter charge are now one commit. Dispatch also requires
+a process-local ticket, so restarting cannot reuse a persisted PREPARED request.
+The Windows synthetic canary creates fresh UUID slots, exercises two competing
+processes against one 30-request bucket, and verifies deletion of both native
+slots. It never uses a real token or calls a provider. Physical lock, reboot,
+refresh, and the 24-hour observation are still untested.
 
 ## Remaining implementation gaps
 
-- Windows-native S3 access/refresh secret broker and monotonic witness.
+- Purpose-bound secret broker, generation/reconnect lifecycle, retest budgets,
+  and full account/subject/scope/expiry binding. The native layer is a primitive,
+  not a qualified provider broker or complete S3 runtime.
 - Manual CLI/PCKE Picker flow, including the exact `{folder,A,B}` callback.
 - Fixed Drive/Docs transport, real `requiredRevisionId` precondition, UTF-16
   text editing, snapshots, rollback verification, and `UNKNOWN` reconciliation.
-- Native synthetic probe, encrypted/private recovery packages, real test
+- Encrypted/private recovery packages, real test
   qualification, restart/lock tests, and all WO-S3-02 actions.
 
 Writes must remain blocked until a future adapter obtains a current Docs

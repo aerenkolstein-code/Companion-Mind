@@ -84,18 +84,24 @@ class MemoryState:
 class Controller:
     FORMAT = 'connector-s3/1'
     def __init__(self, binding, store, limits=Limits()):
-        self.binding, self.store, self.limits, self.lock = binding, store, limits, RLock()
+        self.binding, self.store, self.limits = binding, store, limits
+        self.lock = getattr(store, 'lock', RLock())
+        self._tickets = set()
 
     def initialize(self):
         with self.lock:
-            require(self.store.read() is None, 'LEDGER_ALREADY_EXISTS')
-            self.store.write({'format': self.FORMAT, 'binding': asdict(self.binding),
+            data = {'format': self.FORMAT, 'binding': asdict(self.binding),
                 'revocation_epoch': 0, 'revoked': False, 'api_total': 0, 'api_normal': 0,
                 'api_safety': 0, 'oauth': 0, 'refresh': 0,
                 'writes': {'A': 0, 'B': 0, 'C': 0},
                 'rollbacks': {'A': 0, 'B': 0, 'C': 0}, 'nonrollbacks': {'A': 0, 'B': 0, 'C': 0}, 'creates_c': 0,
                 'buckets': {k: 0 for k in dict(self.limits.ordinary_buckets + self.limits.safety_buckets)},
-                'operations': {}})
+                'operations': {}}
+            if hasattr(self.store, 'initialize'):
+                self.store.initialize(data)
+            else:
+                require(self.store.read() is None, 'LEDGER_ALREADY_EXISTS')
+                self.store.write(data)
 
     def _load(self):
         data = self.store.read()
@@ -108,10 +114,42 @@ class Controller:
                 and all(type(data[k]) is int and data[k] >= 0 for k in
                         ('api_total', 'api_normal', 'api_safety', 'oauth', 'refresh', 'creates_c')),
                 'RECOVERY_REQUIRED')
+        require(all(type(data[k]) is dict for k in ('writes', 'rollbacks', 'nonrollbacks', 'buckets', 'operations')),
+                'RECOVERY_REQUIRED')
         require(set(data['writes']) == {'A','B','C'} and set(data['rollbacks']) == {'A','B','C'} and set(data['nonrollbacks']) == {'A','B','C'}
                 and all(type(v) is int and v >= 0 for d in (data['writes'], data['rollbacks'], data['nonrollbacks']) for v in d.values())
                 and type(data['operations']) is dict and set(data['buckets']) == set(dict(self.limits.ordinary_buckets + self.limits.safety_buckets))
                 and all(type(v) is int and v >= 0 for v in data['buckets'].values()), 'RECOVERY_REQUIRED')
+        states = {'PREPARED', 'DISPATCHED', 'VERIFIED', 'CONFLICT', 'FAILED', 'UNKNOWN', 'ROLLED_BACK'}
+        oauth_count = 0
+        for key, op in data['operations'].items():
+            require(type(key) is str and 1 <= len(key) <= 128 and type(op) is dict,
+                    'RECOVERY_REQUIRED')
+            is_oauth = op.get('state') == 'OAUTH_STARTED'
+            expected = {'state', 'epoch', 'file'} if is_oauth else {'state', 'epoch', 'file', 'cleanup'}
+            require(set(op) == expected and type(op['state']) is str and (is_oauth or op['state'] in states)
+                    and type(op['epoch']) is int and 0 <= op['epoch'] <= data['revocation_epoch']
+                    and op['file'] in (None, 'A', 'B', 'C'), 'RECOVERY_REQUIRED')
+            require((is_oauth and op['file'] is None) or (not is_oauth and type(op['cleanup']) is bool),
+                    'RECOVERY_REQUIRED')
+            oauth_count += int(is_oauth)
+        require(data['oauth'] == oauth_count <= self.limits.oauth
+                and data['api_total'] == len(data['operations']) - oauth_count
+                and data['api_total'] == data['api_normal'] + data['api_safety'] <= self.limits.api_total
+                and data['refresh'] <= min(self.limits.refresh, data['api_total'])
+                and data['creates_c'] <= min(self.limits.creates_c, data['nonrollbacks']['C']),
+                'RECOVERY_REQUIRED')
+        for lane in ('normal', 'safety'):
+            caps = self.limits.buckets(lane)
+            require(data['api_' + lane] == sum(data['buckets'][k] for k in caps)
+                    <= getattr(self.limits, 'api_' + lane)
+                    and all(data['buckets'][k] <= cap for k, cap in caps.items()), 'RECOVERY_REQUIRED')
+        for file in ('A', 'B', 'C'):
+            require(data['writes'][file] == data['rollbacks'][file] + data['nonrollbacks'][file]
+                    <= getattr(self.limits, 'writes_' + file.lower())
+                    and data['rollbacks'][file] <= getattr(self.limits, 'rollbacks_' + file.lower())
+                    and data['nonrollbacks'][file] <= getattr(self.limits, 'nonrollbacks_' + file.lower()),
+                    'RECOVERY_REQUIRED')
         return data
 
     def _save(self, data):
@@ -124,7 +162,8 @@ class Controller:
         """Charge a browser/listener start before either component is launched."""
         with self.lock:
             data = self._load(); self._live(data)
-            require(type(operation_id) is str and operation_id not in data['operations'], 'OPERATION_REPLAY')
+            require(type(operation_id) is str and 1 <= len(operation_id) <= 128
+                    and operation_id not in data['operations'], 'OPERATION_REPLAY')
             require(data['oauth'] < self.limits.oauth, 'OAUTH_BUDGET_EXHAUSTED')
             data['oauth'] += 1
             data['operations'][operation_id] = {'state': 'OAUTH_STARTED', 'epoch': data['revocation_epoch'], 'file': None}
@@ -156,13 +195,13 @@ class Controller:
                 if not rollback: require(data['nonrollbacks'][file] < getattr(self.limits, 'nonrollbacks_' + file.lower()), 'NONROLLBACK_BUDGET_EXHAUSTED')
                 if create: require(file == 'C' and data['creates_c'] < self.limits.creates_c, 'CREATE_BUDGET_EXHAUSTED')
             data['operations'][operation_id] = {'state': 'PREPARED', 'epoch': data['revocation_epoch'], 'file': file, 'cleanup': cleanup}
-            self._save(data)
             data['api_total'] += 1; data['api_' + lane] += 1
             data['buckets'][bucket] += 1
             data['refresh'] += int(refresh)
             if file:
                 data['writes'][file] += 1; data['rollbacks'][file] += int(rollback); data['nonrollbacks'][file] += int(not rollback); data['creates_c'] += int(create)
             self._save(data)
+            self._tickets.add(operation_id)
             return data['revocation_epoch']
 
     def dispatch(self, operation_id, epoch):
@@ -170,9 +209,10 @@ class Controller:
         with self.lock:
             data = self._load()
             op = data['operations'].get(operation_id)
-            require(type(op) is dict and op.get('state') == 'PREPARED'
+            require(operation_id in self._tickets and type(op) is dict and op.get('state') == 'PREPARED'
                     and op.get('epoch') == data['revocation_epoch'] == epoch, 'DISPATCH_DENIED')
             require((not data['revoked']) or op.get('cleanup') is True, 'GRANT_REVOKED')
+            self._tickets.remove(operation_id)
             op['state'] = 'DISPATCHED'; self._save(data)
 
     def complete(self, operation_id, outcome):

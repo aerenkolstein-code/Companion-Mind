@@ -559,6 +559,8 @@ class Slice1Conformance(unittest.TestCase):
             "tools/connector_alpha_native_probe.py",
             "companion_mind/connector_s3/__init__.py",
             "companion_mind/connector_s3/policy.py",
+            "companion_mind/connector_s3/native.py",
+            "tests/test_connector_s3_native.py",
             "tests/test_connector_s3_policy.py",
             "docs/connector_s3_local_design.md",
         })
