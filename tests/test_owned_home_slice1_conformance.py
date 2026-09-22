@@ -557,6 +557,10 @@ class Slice1Conformance(unittest.TestCase):
             "docs/owned_home_connector_alpha_v1.md",
             "tests/.ca_cli_scratch/.gitignore",
             "tools/connector_alpha_native_probe.py",
+            "companion_mind/connector_s3/__init__.py",
+            "companion_mind/connector_s3/policy.py",
+            "tests/test_connector_s3_policy.py",
+            "docs/connector_s3_local_design.md",
         })
         def permitted(path):
             # Explicitly approved C1 S0 publication compatibility allowance.
