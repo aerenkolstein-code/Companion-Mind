@@ -110,11 +110,36 @@ class StageLifecycle:
             data['revoked'] = True
             self._save(data)
 
+    def begin_manual_reconnect(self, binding):
+        """Create only the next consent-pending generation; never revive the old one."""
+        require(isinstance(binding, GenerationBinding), 'BINDING_INVALID')
+        with self.lock:
+            data = self._load()
+            current = data['generations'][str(data['current_generation'])]
+            require(data['revoked'] and current['status'] == 'CLOSED', 'MANUAL_RECONNECT_DENIED')
+            require(binding.generation <= MAX_GENERATIONS
+                    and binding.generation == data['current_generation'] + 1
+                    and binding.stage_key() == data['stage'], 'GENERATION_SCOPE_EXPANSION')
+            data['current_generation'] = binding.generation
+            data['generations'][str(binding.generation)] = {'binding': asdict(binding), 'status': 'CONSENT_REQUIRED'}
+            data['revoked'] = False
+            self._save(data)
+
+    def activate_after_verified_consent(self, binding, proof_hash):
+        """Only a later native identity/Picker verifier may call this transition."""
+        require(type(proof_hash) is str and len(proof_hash) == 64 and all(c in '0123456789abcdef' for c in proof_hash),
+                'CONSENT_PROOF_DENIED')
+        with self.lock:
+            data = self._load()
+            self._bound_current(data, binding, active=False, consent=True)
+            data['generations'][str(binding.generation)]['status'] = 'ACTIVE'
+            self._save(data)
+
     def start_oauth(self, binding, operation_id, *, now, reconnect=None, retest_package=None):
         """Pre-charge an OAuth start; reconnects and retests are stage cumulative."""
         with self.lock:
             data = self._load()
-            self._authorize(data, binding, now)
+            self._authorize_oauth(data, binding, now)
             self._new_operation(data, operation_id)
             inferred_reconnect = any(op['kind'] == 'OAUTH' for op in data['operations'].values())
             require(reconnect in {None, inferred_reconnect}, 'RECONNECT_CLASSIFICATION_DENIED')
@@ -173,19 +198,28 @@ class StageLifecycle:
         self._bound_current(data, binding, active=True)
         require(binding.issued_at <= now < binding.expires_at, 'GENERATION_EXPIRED')
 
+    def _authorize_oauth(self, data, binding, now):
+        require(isinstance(binding, GenerationBinding) and type(now) is int and not data['revoked'], 'GRANT_REVOKED')
+        require(binding.stage_key() == data['stage'] and binding.generation == data['current_generation'],
+                'GENERATION_CLOSED')
+        record = data['generations'].get(str(binding.generation))
+        require(type(record) is dict and record.get('binding') == asdict(binding), 'GENERATION_BINDING_MISMATCH')
+        require(record.get('status') in {'ACTIVE', 'CONSENT_REQUIRED'}, 'GENERATION_CLOSED')
+        require(binding.issued_at <= now < binding.expires_at, 'GENERATION_EXPIRED')
+
     def _cleanup_authorize(self, data, binding, now):
         require(isinstance(binding, GenerationBinding) and type(now) is int and data['revoked'],
                 'CLEANUP_DENIED')
         self._bound_current(data, binding, active=False)
         require(now >= binding.issued_at, 'CLEANUP_DENIED')
 
-    def _bound_current(self, data, binding, *, active):
+    def _bound_current(self, data, binding, *, active, consent=False):
         require(isinstance(binding, GenerationBinding) and binding.stage_key() == data['stage'],
                 'GENERATION_SCOPE_EXPANSION')
         require(type(binding.generation) is int and binding.generation == data['current_generation'],
                 'GENERATION_CLOSED')
         record = data['generations'].get(str(binding.generation))
-        expected = 'ACTIVE' if active else 'CLOSED'
+        expected = 'ACTIVE' if active else ('CONSENT_REQUIRED' if consent else 'CLOSED')
         require(type(record) is dict and record.get('binding') == asdict(binding),
                 'GENERATION_BINDING_MISMATCH')
         require(record.get('status') == expected, 'GENERATION_CLOSED' if active else 'CLEANUP_DENIED')
@@ -283,7 +317,7 @@ class StageLifecycle:
                 bound = GenerationBinding(**record['binding'])
             except (Denied, TypeError):
                 raise Denied('RECOVERY_REQUIRED') from None
-            expected_statuses = {'ACTIVE', 'CLOSED'} if number == data['current_generation'] else {'CLOSED'}
+            expected_statuses = {'ACTIVE', 'CLOSED', 'CONSENT_REQUIRED'} if number == data['current_generation'] else {'CLOSED'}
             require(bound.generation == number and bound.stage_key() == data['stage']
                     and type(record['status']) is str and record['status'] in expected_statuses,
                     'RECOVERY_REQUIRED')

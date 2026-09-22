@@ -148,6 +148,18 @@ class StageLifecycleTests(unittest.TestCase):
         cleanup = reopened.snapshot()['operations']['cleanup']
         self.assertEqual((cleanup['lane'], cleanup['bucket'], cleanup['cleanup']), ('safety', 'revoke', True))
 
+    def test_manual_reconnect_keeps_budget_but_requires_verified_consent(self):
+        self.stage.start_oauth(self.one, 'first', now=1)
+        self.stage.revoke_local(self.one)
+        two = bind(2)
+        self.stage.begin_manual_reconnect(two)
+        with self.assertRaisesRegex(Denied, 'GENERATION_CLOSED'):
+            self.stage.reserve_request(two, 'business-too-early', now=1, lane='normal', bucket='continuity')
+        self.stage.start_oauth(two, 'second', now=1)
+        self.stage.activate_after_verified_consent(two, 'a' * 64)
+        self.stage.reserve_request(two, 'after-proof', now=1, lane='normal', bucket='continuity')
+        self.assertEqual(self.stage.snapshot()['totals']['oauth'], 2)
+
 
 if __name__ == '__main__':
     unittest.main()
