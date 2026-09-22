@@ -38,6 +38,26 @@ from companion_mind.owned_home.tool_gateway import (
 BASE_SHA = "14f0e9cf00413a8ac3ad902b3b9c5641616970a1"
 BASE_TREE = "529eab1585e2598a6da4c846a56e14c743f515c0"
 PROTECTED_TREE = "2d210c5cd283d234ff438487513349430327ed4f"
+CONNECTOR_ALPHA_FILES = frozenset({
+    "companion_mind/connector_alpha/__init__.py",
+    "companion_mind/connector_alpha/cli.py",
+    "companion_mind/connector_alpha/contract.py",
+    "companion_mind/connector_alpha/lifecycle.py",
+    "companion_mind/connector_alpha/oauth.py",
+    "companion_mind/connector_alpha/secret_store.py",
+    "companion_mind/connector_alpha/session.py",
+    "companion_mind/connector_alpha/transport.py",
+    "tests/test_connector_alpha_cli.py",
+    "tests/test_connector_alpha_desktop_client.py",
+    "tests/test_connector_alpha_lifecycle.py",
+    "tests/test_connector_alpha_loopback.py",
+    "tests/test_connector_alpha_oauth_diagnostics.py",
+    "tests/test_connector_alpha_session.py",
+    "tests/test_connector_alpha_transport.py",
+    "tests/test_connector_alpha_transport_diagnostics.py",
+    "docs/connector_alpha_local_qualification.md",
+    "docs/owned_home_connector_alpha_v1.md",
+})
 ALLOWED_FILES = {
     "companion_mind/owned_home/docs_read_guard.py",
     "tests/test_owned_home_docs_read_guard.py",
@@ -45,7 +65,7 @@ ALLOWED_FILES = {
     "tests/test_owned_home_p3s1_conformance.py",
     "tests/test_owned_home_slice1_conformance.py",
     "tests/test_browser_sidecar_s0.py",
-}
+} | CONNECTOR_ALPHA_FILES
 CANARY = "SYNTHETIC_ONLY_RG_SECRET_CANARY_8b3e"
 NOW = "2026-09-20T12:00:00+00:00"
 MATRIX = {}
@@ -395,6 +415,8 @@ class ReadGuardConformance(unittest.TestCase):
         changed = set(git("diff", "--name-only", "HEAD").splitlines())
         changed |= set(git("ls-files", "--others", "--exclude-standard").splitlines())
         self.assertTrue(changed <= ALLOWED_FILES, changed)
+        self.assertNotIn("companion_mind/connector_alpha/unapproved.py", ALLOWED_FILES)
+        self.assertNotIn("companion_mind/owned_home/action_control.py", ALLOWED_FILES)
         with tempfile.TemporaryDirectory() as temp:
             env = dict(os.environ, GIT_INDEX_FILE=str(Path(temp) / "index"))
             subprocess.run(["git", "read-tree", "HEAD"], cwd=ROOT, env=env, check=True)

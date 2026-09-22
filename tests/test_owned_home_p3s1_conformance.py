@@ -33,6 +33,26 @@ from companion_mind.owned_home.shell import make_server
 BASE_SHA = "709c590387f745b8716537f11cc40cd469001753"
 BASE_TREE = "19cdee17eadf4c7aa16709792e33115812d08d6f"
 PROTECTED_TREE = "94d5c674a431f37ca6ff25016afa9f41dd9402cd"
+CONNECTOR_ALPHA_FILES = frozenset({
+    "companion_mind/connector_alpha/__init__.py",
+    "companion_mind/connector_alpha/cli.py",
+    "companion_mind/connector_alpha/contract.py",
+    "companion_mind/connector_alpha/lifecycle.py",
+    "companion_mind/connector_alpha/oauth.py",
+    "companion_mind/connector_alpha/secret_store.py",
+    "companion_mind/connector_alpha/session.py",
+    "companion_mind/connector_alpha/transport.py",
+    "tests/test_connector_alpha_cli.py",
+    "tests/test_connector_alpha_desktop_client.py",
+    "tests/test_connector_alpha_lifecycle.py",
+    "tests/test_connector_alpha_loopback.py",
+    "tests/test_connector_alpha_oauth_diagnostics.py",
+    "tests/test_connector_alpha_session.py",
+    "tests/test_connector_alpha_transport.py",
+    "tests/test_connector_alpha_transport_diagnostics.py",
+    "docs/connector_alpha_local_qualification.md",
+    "docs/owned_home_connector_alpha_v1.md",
+})
 MATRIX = {}
 
 
@@ -149,7 +169,9 @@ class P3S1Conformance(unittest.TestCase):
             "companion_mind/owned_home/docs_read_guard.py",
             "tests/test_owned_home_docs_read_guard.py",
             "docs/owned_home_docs_read_guard_v1.md",
-        }
+        } | CONNECTOR_ALPHA_FILES
+        self.assertNotIn("companion_mind/connector_alpha/unapproved.py", allowed)
+        self.assertNotIn("companion_mind/owned_home/action_control.py", allowed)
         def git(*args):
             return subprocess.check_output(["git", *args], cwd=ROOT, text=True).strip()
         # PR checkout may be a shallow synthetic merge commit. Prove that every

@@ -530,6 +530,26 @@ class Slice1Conformance(unittest.TestCase):
             "companion_mind/owned_home/docs_read_guard.py",
             "tests/test_owned_home_docs_read_guard.py",
             "docs/owned_home_docs_read_guard_v1.md",
+            # CA-01 Connector Alpha is a separate, bounded Windows read path.
+            # Each path is explicit so this gate cannot become a prefix exemption.
+            "companion_mind/connector_alpha/__init__.py",
+            "companion_mind/connector_alpha/cli.py",
+            "companion_mind/connector_alpha/contract.py",
+            "companion_mind/connector_alpha/lifecycle.py",
+            "companion_mind/connector_alpha/oauth.py",
+            "companion_mind/connector_alpha/secret_store.py",
+            "companion_mind/connector_alpha/session.py",
+            "companion_mind/connector_alpha/transport.py",
+            "tests/test_connector_alpha_cli.py",
+            "tests/test_connector_alpha_desktop_client.py",
+            "tests/test_connector_alpha_lifecycle.py",
+            "tests/test_connector_alpha_loopback.py",
+            "tests/test_connector_alpha_oauth_diagnostics.py",
+            "tests/test_connector_alpha_session.py",
+            "tests/test_connector_alpha_transport.py",
+            "tests/test_connector_alpha_transport_diagnostics.py",
+            "docs/connector_alpha_local_qualification.md",
+            "docs/owned_home_connector_alpha_v1.md",
         })
         def permitted(path):
             # Explicitly approved C1 S0 publication compatibility allowance.
@@ -546,6 +566,8 @@ class Slice1Conformance(unittest.TestCase):
             )
         changed = set(git("diff", "--name-only", "HEAD").splitlines()) | set(git("ls-files", "--others", "--exclude-standard").splitlines())
         self.assertTrue(all(permitted(p) for p in changed), changed)
+        self.assertFalse(permitted("companion_mind/connector_alpha/unapproved.py"))
+        self.assertFalse(permitted("companion_mind/owned_home/action_control.py"))
         # Shallow CI need not contain the parent commit object. Reconstruct the
         # unchanged protected tree by removing only the approved mutable surface from
         # HEAD using a temporary index. Exact Git tree equality proves *all*
