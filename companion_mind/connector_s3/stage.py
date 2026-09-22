@@ -11,10 +11,11 @@ from dataclasses import asdict, dataclass
 from threading import RLock
 
 from .policy import Denied, Limits, require
+from .transactions import spendable_totals, validate_transactions, require_file_available
 
 
 SCOPE = 'drive.file'
-FORMAT = 'connector-s3-stage/1'
+FORMAT = 'connector-s3-stage/2'
 RETEST_PACKAGES = (1, 2)
 MAX_GENERATIONS = 4
 
@@ -173,7 +174,9 @@ class StageLifecycle:
                         and (intent_hash, intent_resource, intent_revision) ==
                             (data['operations'][intent_ref]['intent_hash'], data['operations'][intent_ref]['resource'], data['operations'][intent_ref]['revision'])),
                     'INTENT_PIN_MISMATCH')
-            self._check_request(data['totals'], lane, bucket, file, rollback, create, refresh, retest_package)
+            if file:
+                require_file_available(data, file)
+            self._check_request(spendable_totals(data), lane, bucket, file, rollback, create, refresh, retest_package)
             data['operations'][operation_id] = {
                 'kind': 'REQUEST', 'generation': binding.generation, 'lane': lane,
                 'bucket': bucket, 'file': file, 'rollback': rollback, 'create': create,
@@ -203,7 +206,7 @@ class StageLifecycle:
             data = self._load()
             self._cleanup_authorize(data, binding, now)
             self._new_operation(data, operation_id)
-            self._check_request(data['totals'], 'safety', 'revoke', None, False, False, False, None)
+            self._check_request(spendable_totals(data), 'safety', 'revoke', None, False, False, False, None)
             data['operations'][operation_id] = {
                 'kind': 'REQUEST', 'generation': binding.generation, 'lane': 'safety',
                 'bucket': 'revoke', 'file': None, 'rollback': False, 'create': False,
@@ -310,7 +313,7 @@ class StageLifecycle:
     def _initial(self, binding):
         return {'format': FORMAT, 'stage': binding.stage_key(), 'current_generation': binding.generation,
                 'generations': {str(binding.generation): {'binding': asdict(binding), 'status': 'ACTIVE'}},
-                'revoked': False, 'totals': self._totals(), 'operations': {}}
+                'revoked': False, 'totals': self._totals(), 'operations': {}, 'transactions': {}}
 
     def _totals(self):
         return {'oauth': 0, 'reconnect': 0, 'refresh': 0, 'api_total': 0, 'api_normal': 0,
@@ -326,12 +329,13 @@ class StageLifecycle:
             data = copy.deepcopy(self.store.read())
         except (TypeError, ValueError):
             raise Denied('RECOVERY_REQUIRED') from None
-        require(type(data) is dict and set(data) == {'format', 'stage', 'current_generation', 'generations', 'revoked', 'totals', 'operations'}
+        require(type(data) is dict and set(data) == {'format', 'stage', 'current_generation', 'generations', 'revoked', 'totals', 'operations', 'transactions'}
                 and data.get('format') == FORMAT and data.get('stage') == self.binding.stage_key(),
                 'RECOVERY_REQUIRED')
         require(type(data['current_generation']) is int and 1 <= data['current_generation'] <= MAX_GENERATIONS
                 and type(data['generations']) is dict and type(data['totals']) is dict
-                and type(data['operations']) is dict and type(data['revoked']) is bool, 'RECOVERY_REQUIRED')
+                and type(data['operations']) is dict and type(data['transactions']) is dict
+                and type(data['revoked']) is bool, 'RECOVERY_REQUIRED')
         expected_generations = {str(i) for i in range(1, data['current_generation'] + 1)}
         require(set(data['generations']) == expected_generations, 'RECOVERY_REQUIRED')
         for number in range(1, data['current_generation'] + 1):
@@ -347,6 +351,13 @@ class StageLifecycle:
                     and type(record['status']) is str and record['status'] in expected_statuses,
                     'RECOVERY_REQUIRED')
         require(data['totals'] == self._rebuild_totals(data['operations']), 'RECOVERY_REQUIRED')
+        validate_transactions(data)
+        held = spendable_totals(data)
+        require(held['api_total'] <= self.limits.api_total and held['api_safety'] <= self.limits.api_safety
+                and held['buckets']['restore_existing_and_readback'] <= self.limits.buckets('safety')['restore_existing_and_readback']
+                and all(held['writes'][f] <= getattr(self.limits, 'writes_' + f.lower())
+                        and held['rollbacks'][f] <= getattr(self.limits, 'rollbacks_' + f.lower()) for f in ('A', 'B', 'C'))
+                and all(r['api'] <= 20 and r['rollback'] <= 1 for r in held['retest'].values()), 'RESTORE_RESERVE_EXHAUSTED')
         return data
 
     def _rebuild_totals(self, operations):
