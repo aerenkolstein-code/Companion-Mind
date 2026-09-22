@@ -94,7 +94,9 @@ class PurposeBroker:
         with self.lifecycle.lock:
             self.lifecycle.reserve_request(self.binding, operation_id, now=now, lane=lane, bucket=bucket,
                                            file=file, rollback=rollback, create=create,
-                                           retest_package=retest_package, intent_ref=intent_ref)
+                                           retest_package=retest_package, intent_ref=intent_ref,
+                                           intent_hash=intent.intent_hash, intent_resource=intent.resource_id,
+                                           intent_revision=intent.revision)
             self.lifecycle.assert_active(self.binding, now=now)
             return self.dispatcher.dispatch(operation_id, 'business', intent,
                                             self.secrets.business_token(self.token_ref))

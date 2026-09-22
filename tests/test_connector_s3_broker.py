@@ -35,6 +35,14 @@ class PurposeBrokerTests(unittest.TestCase):
         self.assertEqual((receipt.purpose, receipt.resource_id), ('business', 'file-a'))
         self.assertNotIn('business-token', repr(receipt))
         self.assertEqual(self.secrets.calls, [('business', 'synthetic-token-ref')])
+        before = (len(self.dispatcher.records), self.lifecycle.snapshot()['totals']['api_total'])
+        with self.assertRaisesRegex(Denied, 'INTENT_PIN_MISMATCH'):
+            self.broker.business('different-body', RequestIntent('POST', 'docs.batchUpdate', 'file-a', 'c' * 64, 'revision-1'),
+                                 now=1, lane='normal', bucket='A_B_flow', file='A', intent_ref=pin)
+        with self.assertRaisesRegex(Denied, 'INTENT_PIN_MISMATCH'):
+            self.broker.business('different-revision', RequestIntent('POST', 'docs.batchUpdate', 'file-a', BODY, 'revision-2'),
+                                 now=1, lane='normal', bucket='A_B_flow', file='A', intent_ref=pin)
+        self.assertEqual((len(self.dispatcher.records), self.lifecycle.snapshot()['totals']['api_total']), before)
         with self.assertRaisesRegex(Denied, 'RESOURCE_DENIED'):
             self.broker.business('wrong-resource', RequestIntent('POST', 'docs.batchUpdate', 'file-b', BODY, 'r'),
                                  now=1, lane='normal', bucket='A_B_flow', file='A', intent_ref='pin-a')

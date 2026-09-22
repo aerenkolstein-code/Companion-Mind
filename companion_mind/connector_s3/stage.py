@@ -152,7 +152,8 @@ class StageLifecycle:
             self._save(data)
 
     def reserve_request(self, binding, operation_id, *, now, lane, bucket, file=None,
-                        rollback=False, create=False, refresh=False, retest_package=None, intent_ref=None):
+                        rollback=False, create=False, refresh=False, retest_package=None, intent_ref=None,
+                        intent_hash=None, intent_resource=None, intent_revision=None):
         """Pre-charge a synthetic provider request against all applicable caps."""
         with self.lock:
             data = self._load()
@@ -164,13 +165,21 @@ class StageLifecycle:
             require(type(rollback) is bool and type(create) is bool and type(refresh) is bool,
                     'REQUEST_INVALID')
             require(not create or (file == 'C' and not rollback), 'CREATE_DENIED')
-            require(intent_ref is None or (type(intent_ref) is str and intent_ref in data['operations']), 'INTENT_PIN_REQUIRED')
+            require((intent_ref is None and intent_hash is None and intent_resource is None and intent_revision is None)
+                    or (type(intent_ref) is str and type(intent_hash) is str and len(intent_hash) == 64
+                        and type(intent_resource) is str and type(intent_revision) is str
+                        and type(data['operations'].get(intent_ref)) is dict
+                        and data['operations'][intent_ref].get('kind') == 'WRITE_INTENT'
+                        and (intent_hash, intent_resource, intent_revision) ==
+                            (data['operations'][intent_ref]['intent_hash'], data['operations'][intent_ref]['resource'], data['operations'][intent_ref]['revision'])),
+                    'INTENT_PIN_MISMATCH')
             self._check_request(data['totals'], lane, bucket, file, rollback, create, refresh, retest_package)
             data['operations'][operation_id] = {
                 'kind': 'REQUEST', 'generation': binding.generation, 'lane': lane,
                 'bucket': bucket, 'file': file, 'rollback': rollback, 'create': create,
                 'refresh': refresh, 'retest_package': retest_package, 'cleanup': False,
                 'intent_ref': intent_ref,
+                'intent_hash': intent_hash, 'intent_resource': intent_resource, 'intent_revision': intent_revision,
                 'sequence': len(data['operations']) + 1}
             data['totals'] = self._rebuild_totals(data['operations'])
             self._save(data)
@@ -199,6 +208,7 @@ class StageLifecycle:
                 'kind': 'REQUEST', 'generation': binding.generation, 'lane': 'safety',
                 'bucket': 'revoke', 'file': None, 'rollback': False, 'create': False,
                 'refresh': False, 'retest_package': None, 'cleanup': True, 'intent_ref': None,
+                'intent_hash': None, 'intent_resource': None, 'intent_revision': None,
                 'sequence': len(data['operations']) + 1}
             data['totals'] = self._rebuild_totals(data['operations'])
             self._save(data)
@@ -363,14 +373,18 @@ class StageLifecycle:
                 totals['oauth'] += 1
                 totals['reconnect'] += int(inferred)
             elif op['kind'] == 'REQUEST':
-                required = {'kind', 'generation', 'lane', 'bucket', 'file', 'rollback', 'create', 'refresh', 'retest_package', 'cleanup', 'intent_ref', 'sequence'}
+                required = {'kind', 'generation', 'lane', 'bucket', 'file', 'rollback', 'create', 'refresh', 'retest_package', 'cleanup', 'intent_ref', 'intent_hash', 'intent_resource', 'intent_revision', 'sequence'}
                 require(set(op) == required and type(op['lane']) is str and op['lane'] in {'normal', 'safety'}
                         and (op['file'] is None or (type(op['file']) is str and op['file'] in {'A', 'B', 'C'}))
                         and type(op['bucket']) is str
                         and all(type(op[name]) is bool for name in ('rollback', 'create', 'refresh')),
                         'RECOVERY_REQUIRED')
-                require(op['intent_ref'] is None or (type(op['intent_ref']) is str and op['intent_ref'] in pins
-                        and pins[op['intent_ref']]['generation'] == op['generation']), 'RECOVERY_REQUIRED')
+                require((op['intent_ref'] is None and op['intent_hash'] is None and op['intent_resource'] is None and op['intent_revision'] is None)
+                        or (type(op['intent_ref']) is str and op['intent_ref'] in pins
+                            and pins[op['intent_ref']]['generation'] == op['generation']
+                            and (op['intent_hash'], op['intent_resource'], op['intent_revision']) ==
+                                (pins[op['intent_ref']]['intent_hash'], pins[op['intent_ref']]['resource'], pins[op['intent_ref']]['revision'])),
+                        'RECOVERY_REQUIRED')
                 caps = self.limits.buckets(op['lane'])
                 require(op['bucket'] in caps and (not op['create'] or (op['file'] == 'C' and not op['rollback'])),
                         'RECOVERY_REQUIRED')

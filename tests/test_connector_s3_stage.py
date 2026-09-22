@@ -164,9 +164,10 @@ class StageLifecycleTests(unittest.TestCase):
         self.stage.pin_write_intent(self.one, 'pin-a', now=1, resource='file-a', revision='r1',
                                     intent_hash='a' * 64, recovery_hash='b' * 64)
         self.stage.reserve_request(self.one, 'write-a', now=1, lane='normal', bucket='A_B_flow',
-                                   file='A', intent_ref='pin-a')
+                                   file='A', intent_ref='pin-a', intent_hash='a' * 64,
+                                   intent_resource='file-a', intent_revision='r1')
         self.assertEqual(self.stage.snapshot()['operations']['write-a']['intent_ref'], 'pin-a')
-        with self.assertRaisesRegex(Denied, 'INTENT_PIN_REQUIRED'):
+        with self.assertRaisesRegex(Denied, 'INTENT_PIN_MISMATCH'):
             self.stage.reserve_request(self.one, 'missing-pin', now=1, lane='normal', bucket='A_B_flow',
                                        file='A', intent_ref='missing')
 
