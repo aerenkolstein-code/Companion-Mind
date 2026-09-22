@@ -11,6 +11,7 @@ from uuid import uuid4
 
 from companion_mind.connector_s3.native import NativeLedger, S3CredentialStore, PREFIX, current_sid
 from companion_mind.connector_s3.policy import Binding, Controller, Denied
+from companion_mind.connector_s3.stage import GenerationBinding, StageLifecycle
 
 
 class FakeStore:
@@ -31,6 +32,11 @@ class FakeStore:
 
 def binding():
     return Binding(1, 'folder', 'file-a', 'file-b', 'client', 'project', 'synthetic-sid')
+
+
+def stage_binding(generation=1):
+    return GenerationBinding(generation, 'account', 'subject', 'googleapis.com', 'client', 'project',
+                             'drive.file', 'synthetic-sid', 0, 500, 'folder', 'file-a', 'file-b')
 
 
 def _compete(directory, target, ready, output):
@@ -140,6 +146,20 @@ class NativeLedgerTests(unittest.TestCase):
                 c.reserve('no-ticket', lane='normal', bucket='initialization')
         with self.assertRaisesRegex(Denied, 'DISPATCH_DENIED'):
             c.dispatch('no-ticket', 0)
+    def test_stage_budget_survives_native_ledger_reopen(self):
+        one = stage_binding()
+        lifecycle = StageLifecycle(one, self.ledger)
+        lifecycle.initialize()
+        lifecycle.start_oauth(one, 'oauth', now=1)
+        lifecycle.reserve_request(one, 'write-a', now=1, lane='normal', bucket='A_B_flow', file='A')
+        lifecycle.close_generation(1)
+        two = stage_binding(2)
+        lifecycle.start_next_generation(two)
+        reopened_ledger = NativeLedger(self.temp.name, self.store, self.target, 'synthetic-stage')
+        reopened = StageLifecycle(two, reopened_ledger)
+        reopened.reserve_request(two, 'refresh', now=1, lane='normal', bucket='continuity', refresh=True)
+        totals = reopened.snapshot()['totals']
+        self.assertEqual((totals['oauth'], totals['refresh'], totals['writes']['A']), (1, 1, 1))
 
 
 @unittest.skipUnless(os.name == 'nt', 'Windows native qualification only')
