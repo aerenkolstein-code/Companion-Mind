@@ -160,6 +160,16 @@ class StageLifecycleTests(unittest.TestCase):
         self.stage.reserve_request(two, 'after-proof', now=1, lane='normal', bucket='continuity')
         self.assertEqual(self.stage.snapshot()['totals']['oauth'], 2)
 
+    def test_write_intent_pin_survives_reopen_and_must_match_generation(self):
+        self.stage.pin_write_intent(self.one, 'pin-a', now=1, resource='file-a', revision='r1',
+                                    intent_hash='a' * 64, recovery_hash='b' * 64)
+        self.stage.reserve_request(self.one, 'write-a', now=1, lane='normal', bucket='A_B_flow',
+                                   file='A', intent_ref='pin-a')
+        self.assertEqual(self.stage.snapshot()['operations']['write-a']['intent_ref'], 'pin-a')
+        with self.assertRaisesRegex(Denied, 'INTENT_PIN_REQUIRED'):
+            self.stage.reserve_request(self.one, 'missing-pin', now=1, lane='normal', bucket='A_B_flow',
+                                       file='A', intent_ref='missing')
+
 
 if __name__ == '__main__':
     unittest.main()

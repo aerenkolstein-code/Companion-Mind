@@ -42,6 +42,11 @@ class RequestIntent:
         else:
             require(self.method == 'POST' and self.revision is None, 'INTENT_INVALID')
 
+    @property
+    def intent_hash(self):
+        return hashlib.sha256((self.method + '\0' + self.endpoint + '\0' + self.resource_id + '\0'
+                               + self.body_hash + '\0' + str(self.revision)).encode()).hexdigest()
+
 
 @dataclass(frozen=True)
 class DispatchReceipt:
@@ -82,16 +87,26 @@ class PurposeBroker:
         self.secrets, self.token_ref, self.dispatcher = secrets, token_ref, dispatcher
 
     def business(self, operation_id, intent, *, now, lane, bucket, file, rollback=False, create=False,
-                 retest_package=None):
+                 retest_package=None, intent_ref=None):
         require(isinstance(intent, RequestIntent) and intent.endpoint in _BUSINESS, 'ENDPOINT_DENIED')
         require(intent.resource_id == self._file_id(file), 'RESOURCE_DENIED')
+        require(type(intent_ref) is str, 'INTENT_PIN_REQUIRED')
         with self.lifecycle.lock:
             self.lifecycle.reserve_request(self.binding, operation_id, now=now, lane=lane, bucket=bucket,
                                            file=file, rollback=rollback, create=create,
-                                           retest_package=retest_package)
+                                           retest_package=retest_package, intent_ref=intent_ref)
             self.lifecycle.assert_active(self.binding, now=now)
             return self.dispatcher.dispatch(operation_id, 'business', intent,
                                             self.secrets.business_token(self.token_ref))
+
+    def pin_write(self, pin_id, intent, recovery_hash, *, now):
+        require(isinstance(intent, RequestIntent) and intent.endpoint in _BUSINESS
+                and type(recovery_hash) is str and len(recovery_hash) == 64, 'INTENT_PIN_DENIED')
+        with self.lifecycle.lock:
+            self.lifecycle.pin_write_intent(self.binding, pin_id, now=now, resource=intent.resource_id,
+                                             revision=intent.revision, intent_hash=intent.intent_hash,
+                                             recovery_hash=recovery_hash)
+        return pin_id
 
     def refresh(self, operation_id, intent, *, now, lane='normal', bucket='continuity', retest_package=None):
         require(isinstance(intent, RequestIntent) and intent.endpoint == _REFRESH, 'ENDPOINT_DENIED')

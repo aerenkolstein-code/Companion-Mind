@@ -30,13 +30,14 @@ class PurposeBrokerTests(unittest.TestCase):
 
     def test_business_is_fixed_and_returns_no_token(self):
         intent = RequestIntent('POST', 'docs.batchUpdate', 'file-a', BODY, 'revision-1')
-        receipt = self.broker.business('write-a', intent, now=1, lane='normal', bucket='A_B_flow', file='A')
+        pin = self.broker.pin_write('pin-a', intent, 'b' * 64, now=1)
+        receipt = self.broker.business('write-a', intent, now=1, lane='normal', bucket='A_B_flow', file='A', intent_ref=pin)
         self.assertEqual((receipt.purpose, receipt.resource_id), ('business', 'file-a'))
         self.assertNotIn('business-token', repr(receipt))
         self.assertEqual(self.secrets.calls, [('business', 'synthetic-token-ref')])
         with self.assertRaisesRegex(Denied, 'RESOURCE_DENIED'):
             self.broker.business('wrong-resource', RequestIntent('POST', 'docs.batchUpdate', 'file-b', BODY, 'r'),
-                                 now=1, lane='normal', bucket='A_B_flow', file='A')
+                                 now=1, lane='normal', bucket='A_B_flow', file='A', intent_ref='pin-a')
 
     def test_refresh_and_post_revoke_business_are_zero_dispatch(self):
         refresh = RequestIntent('POST', 'oauth.token.refresh', 'synthetic-token-ref', BODY, None)
@@ -47,7 +48,7 @@ class PurposeBrokerTests(unittest.TestCase):
         before = len(self.dispatcher.records)
         with self.assertRaisesRegex(Denied, 'GRANT_REVOKED'):
             restarted.business('after', RequestIntent('POST', 'docs.batchUpdate', 'file-a', BODY, 'r'),
-                               now=1, lane='normal', bucket='A_B_flow', file='A')
+                               now=1, lane='normal', bucket='A_B_flow', file='A', intent_ref='pin')
         with self.assertRaisesRegex(Denied, 'GRANT_REVOKED'):
             restarted.refresh('after-refresh', refresh, now=1)
         self.assertEqual(len(self.dispatcher.records), before)

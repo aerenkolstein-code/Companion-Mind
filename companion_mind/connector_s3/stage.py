@@ -152,7 +152,7 @@ class StageLifecycle:
             self._save(data)
 
     def reserve_request(self, binding, operation_id, *, now, lane, bucket, file=None,
-                        rollback=False, create=False, refresh=False, retest_package=None):
+                        rollback=False, create=False, refresh=False, retest_package=None, intent_ref=None):
         """Pre-charge a synthetic provider request against all applicable caps."""
         with self.lock:
             data = self._load()
@@ -164,14 +164,29 @@ class StageLifecycle:
             require(type(rollback) is bool and type(create) is bool and type(refresh) is bool,
                     'REQUEST_INVALID')
             require(not create or (file == 'C' and not rollback), 'CREATE_DENIED')
+            require(intent_ref is None or (type(intent_ref) is str and intent_ref in data['operations']), 'INTENT_PIN_REQUIRED')
             self._check_request(data['totals'], lane, bucket, file, rollback, create, refresh, retest_package)
             data['operations'][operation_id] = {
                 'kind': 'REQUEST', 'generation': binding.generation, 'lane': lane,
                 'bucket': bucket, 'file': file, 'rollback': rollback, 'create': create,
                 'refresh': refresh, 'retest_package': retest_package, 'cleanup': False,
+                'intent_ref': intent_ref,
                 'sequence': len(data['operations']) + 1}
             data['totals'] = self._rebuild_totals(data['operations'])
             self._save(data)
+
+    def pin_write_intent(self, binding, pin_id, *, now, resource, revision, intent_hash, recovery_hash):
+        """Persist the non-secret recovery and exact write commitment before reserve."""
+        with self.lock:
+            data = self._load(); self._authorize(data, binding, now); self._new_operation(data, pin_id)
+            require(type(resource) is str and resource in {binding.a_id, binding.b_id}
+                    and type(revision) is str and bool(revision)
+                    and all(type(value) is str and len(value) == 64 and all(c in '0123456789abcdef' for c in value)
+                            for value in (intent_hash, recovery_hash)), 'INTENT_PIN_DENIED')
+            data['operations'][pin_id] = {'kind': 'WRITE_INTENT', 'generation': binding.generation,
+                'resource': resource, 'revision': revision, 'intent_hash': intent_hash,
+                'recovery_hash': recovery_hash, 'sequence': len(data['operations']) + 1}
+            data['totals'] = self._rebuild_totals(data['operations']); self._save(data)
 
     def reserve_cleanup(self, binding, operation_id, *, now):
         """The only post-revoke request: fixed safety/revoke, no refresh or file."""
@@ -183,7 +198,7 @@ class StageLifecycle:
             data['operations'][operation_id] = {
                 'kind': 'REQUEST', 'generation': binding.generation, 'lane': 'safety',
                 'bucket': 'revoke', 'file': None, 'rollback': False, 'create': False,
-                'refresh': False, 'retest_package': None, 'cleanup': True,
+                'refresh': False, 'retest_package': None, 'cleanup': True, 'intent_ref': None,
                 'sequence': len(data['operations']) + 1}
             data['totals'] = self._rebuild_totals(data['operations'])
             self._save(data)
@@ -333,9 +348,10 @@ class StageLifecycle:
                     and type(op.get('kind')) is str and type(op.get('generation')) is int
                     and 1 <= op['generation'] <= MAX_GENERATIONS and type(op.get('sequence')) is int
                     and 1 <= op['sequence'] <= len(operations), 'RECOVERY_REQUIRED')
-            records.append(op)
-        require({op['sequence'] for op in records} == set(range(1, len(records) + 1)), 'RECOVERY_REQUIRED')
-        for op in sorted(records, key=lambda record: record['sequence']):
+            records.append((key, op))
+        require({op['sequence'] for _, op in records} == set(range(1, len(records) + 1)), 'RECOVERY_REQUIRED')
+        pins = {}
+        for key, op in sorted(records, key=lambda record: record[1]['sequence']):
             if op['kind'] == 'OAUTH':
                 require(set(op) == {'kind', 'generation', 'reconnect', 'retest_package', 'sequence'}
                         and type(op['reconnect']) is bool, 'RECOVERY_REQUIRED')
@@ -347,12 +363,14 @@ class StageLifecycle:
                 totals['oauth'] += 1
                 totals['reconnect'] += int(inferred)
             elif op['kind'] == 'REQUEST':
-                required = {'kind', 'generation', 'lane', 'bucket', 'file', 'rollback', 'create', 'refresh', 'retest_package', 'cleanup', 'sequence'}
+                required = {'kind', 'generation', 'lane', 'bucket', 'file', 'rollback', 'create', 'refresh', 'retest_package', 'cleanup', 'intent_ref', 'sequence'}
                 require(set(op) == required and type(op['lane']) is str and op['lane'] in {'normal', 'safety'}
                         and (op['file'] is None or (type(op['file']) is str and op['file'] in {'A', 'B', 'C'}))
                         and type(op['bucket']) is str
                         and all(type(op[name]) is bool for name in ('rollback', 'create', 'refresh')),
                         'RECOVERY_REQUIRED')
+                require(op['intent_ref'] is None or (type(op['intent_ref']) is str and op['intent_ref'] in pins
+                        and pins[op['intent_ref']]['generation'] == op['generation']), 'RECOVERY_REQUIRED')
                 caps = self.limits.buckets(op['lane'])
                 require(op['bucket'] in caps and (not op['create'] or (op['file'] == 'C' and not op['rollback'])),
                         'RECOVERY_REQUIRED')
@@ -384,6 +402,12 @@ class StageLifecycle:
                     totals['rollbacks'][file] += int(op['rollback'])
                     totals['nonrollbacks'][file] += int(not op['rollback'])
                     totals['creates_c'] += int(op['create'])
+            elif op['kind'] == 'WRITE_INTENT':
+                require(set(op) == {'kind', 'generation', 'resource', 'revision', 'intent_hash', 'recovery_hash', 'sequence'}
+                        and type(op['resource']) is str and type(op['revision']) is str and bool(op['revision'])
+                        and all(type(op[k]) is str and len(op[k]) == 64 and all(c in '0123456789abcdef' for c in op[k])
+                                for k in ('intent_hash', 'recovery_hash')), 'RECOVERY_REQUIRED')
+                pins[key] = op
             else:
                 raise Denied('RECOVERY_REQUIRED')
         self._validate_totals(totals)
