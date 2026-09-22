@@ -64,10 +64,24 @@ Manager write/read/delete, one-use read lifecycle, fresh-process denial while a
 read is in progress, cleanup-only token access after closure, and wrong-SID
 rejection. It uses only generated test slots and reports zero Google calls.
 
-The physical Windows lock-screen check is **NOT RUN**. No real OAuth consent,
-Google document read, provider revocation, or real account/application/file
-binding has been run. The automated CLI and transport/session tests use fake
-Google responses and in-memory stores; they are not live-provider evidence.
+The automated CLI and transport/session suite has 72 passing synthetic tests;
+it uses fake Google responses and in-memory stores, and is distinct from native
+synthetic and live-provider evidence. One approved, redacted live validation
+also completed exactly one authorization exchange, one identity check, the fixed
+six-GET reader transaction, cleanup with remote revoke, and an independent
+post-cleanup old-grant denial with zero reads and no output. Its reader result
+is limited to supported text: Drive version was stable; reader revision was
+`NOT_RETURNED`; three reader response fingerprints agreed; and atomicity remains
+`UNKNOWN`. No identities, client/project/file identifiers, document content,
+content fingerprint, credential, or raw receipt is kept in this repository.
+
+The physical Windows lock-screen check is **NOT RUN**. The live validation did
+not test a lock or unlock during consent or reading, and provider propagation
+beyond the observed remote-revoke result is not claimed. The legacy Unix shell
+is not Windows-compatible; this connector is not a full port of prior runtimes.
+This qualification is for the dedicated, non-sensitive test path only: it grants
+no production permission, deployment approval, recurring access, or authority
+for another real OAuth run.
 
 ## Manual operator sequence
 
@@ -104,7 +118,8 @@ compatibility rules ([RFC 6749 section 4.1.2](https://www.rfc-editor.org/rfc/rfc
 they are neither logged nor used for file selection, authorization, or token
 exchange. If the optional `iss` parameter is present, it must be exactly
 `https://accounts.google.com`. This compatibility repair is local-only and does
-not close Connector Alpha's pending real-provider validation stage.
+not expand the completed limited real-provider qualification into a broader or
+production authorization.
 
 For token-exchange failure diagnosis, the receipt can contain only the fixed
 operation enum, numeric HTTP status, and an allowlisted standard Google error
