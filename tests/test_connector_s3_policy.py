@@ -39,12 +39,20 @@ class S3Policy(unittest.TestCase):
         self.assertEqual(self.store.read()['oauth'], 1)
         self.c.revoke_local()
         with self.assertRaisesRegex(Denied, 'GRANT_REVOKED'): self.c.reserve('new-work', lane='normal', bucket='initialization')
-        self.c.reserve('cleanup', lane='safety', bucket='revoke', cleanup=True)
+        epoch = self.c.reserve('cleanup', lane='safety', bucket='revoke', cleanup=True)
+        self.c.dispatch('cleanup', epoch)
+
+    def test_nonrollback_file_cap_blocks_sixth_a_write_before_dispatch(self):
+        for number in range(5):
+            epoch = self.c.reserve('a-%d' % number, lane='normal', bucket='A_B_flow', file='A')
+            self.c.dispatch('a-%d' % number, epoch); self.c.complete('a-%d' % number, 'VERIFIED')
+        with self.assertRaisesRegex(Denied, 'NONROLLBACK_BUDGET_EXHAUSTED'):
+            self.c.reserve('a-six', lane='normal', bucket='A_B_flow', file='A')
 
     def test_revoke_between_reserve_and_dispatch_blocks_old_ticket(self):
         epoch = self.c.reserve('pending', lane='normal', bucket='initialization')
         self.c.revoke_local()
-        with self.assertRaisesRegex(Denied, 'GRANT_REVOKED'): self.c.dispatch('pending', epoch)
+        with self.assertRaisesRegex(Denied, 'DISPATCH_DENIED'): self.c.dispatch('pending', epoch)
 
 
 if __name__ == '__main__': unittest.main()

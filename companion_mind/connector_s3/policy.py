@@ -29,6 +29,9 @@ class Limits:
     writes_a: int = 8
     writes_b: int = 8
     writes_c: int = 8
+    nonrollbacks_a: int = 5
+    nonrollbacks_b: int = 5
+    nonrollbacks_c: int = 6
     rollbacks_a: int = 3
     rollbacks_b: int = 3
     rollbacks_c: int = 2
@@ -90,7 +93,7 @@ class Controller:
                 'revocation_epoch': 0, 'revoked': False, 'api_total': 0, 'api_normal': 0,
                 'api_safety': 0, 'oauth': 0, 'refresh': 0,
                 'writes': {'A': 0, 'B': 0, 'C': 0},
-                'rollbacks': {'A': 0, 'B': 0, 'C': 0}, 'creates_c': 0,
+                'rollbacks': {'A': 0, 'B': 0, 'C': 0}, 'nonrollbacks': {'A': 0, 'B': 0, 'C': 0}, 'creates_c': 0,
                 'buckets': {k: 0 for k in dict(self.limits.ordinary_buckets + self.limits.safety_buckets)},
                 'operations': {}})
 
@@ -99,14 +102,14 @@ class Controller:
         require(type(data) is dict and data.get('format') == self.FORMAT
                 and data.get('binding') == asdict(self.binding), 'RECOVERY_REQUIRED')
         required = {'format', 'binding', 'revocation_epoch', 'revoked', 'api_total', 'api_normal',
-                    'api_safety', 'oauth', 'refresh', 'writes', 'rollbacks', 'creates_c', 'buckets', 'operations'}
+                    'api_safety', 'oauth', 'refresh', 'writes', 'rollbacks', 'nonrollbacks', 'creates_c', 'buckets', 'operations'}
         require(set(data) == required and type(data['revoked']) is bool
                 and type(data['revocation_epoch']) is int and data['revocation_epoch'] >= 0
                 and all(type(data[k]) is int and data[k] >= 0 for k in
                         ('api_total', 'api_normal', 'api_safety', 'oauth', 'refresh', 'creates_c')),
                 'RECOVERY_REQUIRED')
-        require(set(data['writes']) == {'A','B','C'} and set(data['rollbacks']) == {'A','B','C'}
-                and all(type(v) is int and v >= 0 for d in (data['writes'], data['rollbacks']) for v in d.values())
+        require(set(data['writes']) == {'A','B','C'} and set(data['rollbacks']) == {'A','B','C'} and set(data['nonrollbacks']) == {'A','B','C'}
+                and all(type(v) is int and v >= 0 for d in (data['writes'], data['rollbacks'], data['nonrollbacks']) for v in d.values())
                 and type(data['operations']) is dict and set(data['buckets']) == set(dict(self.limits.ordinary_buckets + self.limits.safety_buckets))
                 and all(type(v) is int and v >= 0 for v in data['buckets'].values()), 'RECOVERY_REQUIRED')
         return data
@@ -150,24 +153,26 @@ class Controller:
             if file:
                 require(data['writes'][file] < getattr(self.limits, 'writes_' + file.lower()), 'WRITE_BUDGET_EXHAUSTED')
                 if rollback: require(data['rollbacks'][file] < getattr(self.limits, 'rollbacks_' + file.lower()), 'ROLLBACK_BUDGET_EXHAUSTED')
+                if not rollback: require(data['nonrollbacks'][file] < getattr(self.limits, 'nonrollbacks_' + file.lower()), 'NONROLLBACK_BUDGET_EXHAUSTED')
                 if create: require(file == 'C' and data['creates_c'] < self.limits.creates_c, 'CREATE_BUDGET_EXHAUSTED')
-            data['operations'][operation_id] = {'state': 'PREPARED', 'epoch': data['revocation_epoch'], 'file': file}
+            data['operations'][operation_id] = {'state': 'PREPARED', 'epoch': data['revocation_epoch'], 'file': file, 'cleanup': cleanup}
             self._save(data)
             data['api_total'] += 1; data['api_' + lane] += 1
             data['buckets'][bucket] += 1
             data['refresh'] += int(refresh)
             if file:
-                data['writes'][file] += 1; data['rollbacks'][file] += int(rollback); data['creates_c'] += int(create)
+                data['writes'][file] += 1; data['rollbacks'][file] += int(rollback); data['nonrollbacks'][file] += int(not rollback); data['creates_c'] += int(create)
             self._save(data)
             return data['revocation_epoch']
 
     def dispatch(self, operation_id, epoch):
         """Only the future native broker may call this under its cross-process lock."""
         with self.lock:
-            data = self._load(); self._live(data)
+            data = self._load()
             op = data['operations'].get(operation_id)
             require(type(op) is dict and op.get('state') == 'PREPARED'
                     and op.get('epoch') == data['revocation_epoch'] == epoch, 'DISPATCH_DENIED')
+            require((not data['revoked']) or op.get('cleanup') is True, 'GRANT_REVOKED')
             op['state'] = 'DISPATCHED'; self._save(data)
 
     def complete(self, operation_id, outcome):
