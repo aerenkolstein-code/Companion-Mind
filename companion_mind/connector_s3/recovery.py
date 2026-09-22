@@ -10,7 +10,7 @@ import hashlib
 import os
 from pathlib import Path
 from .native import current_sid
-from .policy import require
+from .policy import Denied, require
 
 MAX_PACKAGE = 2 * 1024 * 1024
 
@@ -68,6 +68,7 @@ class UserDPAPI:
 @dataclass(frozen=True)
 class RecoveryReceipt:
     operation_id: str
+    binding_hash: str
     cipher_hash: str
     plain_hash: str
     cipher_size: int
@@ -77,6 +78,7 @@ class RecoveryStore:
     def __init__(self, directory, binding_hash, protector):
         require(type(binding_hash) is str and len(binding_hash) == 64
                 and all(c in '0123456789abcdef' for c in binding_hash), 'BINDING_HASH_INVALID')
+        require(type(protector) is UserDPAPI, 'RECOVERY_PROTECTOR_DENIED')
         self.directory = Path(directory).resolve()
         self.binding_hash, self.protector = binding_hash, protector
 
@@ -97,16 +99,20 @@ class RecoveryStore:
             stream.write(cipher)
             stream.flush()
             os.fsync(stream.fileno())
-        receipt = RecoveryReceipt(operation_id, _digest(cipher), _digest(raw), len(cipher))
+        receipt = RecoveryReceipt(operation_id, self.binding_hash, _digest(cipher), _digest(raw), len(cipher))
         require(self.load(receipt) == raw, 'RECOVERY_READBACK_FAILED')
         return receipt
 
     def load(self, receipt):
-        require(type(receipt) is RecoveryReceipt, 'RECOVERY_RECEIPT_INVALID')
+        require(type(receipt) is RecoveryReceipt and receipt.binding_hash == self.binding_hash,
+                'RECOVERY_RECEIPT_INVALID')
         path, entropy = self._location(receipt.operation_id)
-        require(type(receipt.cipher_size) is int and 0 < receipt.cipher_size <= MAX_PACKAGE + 65536
-                and path.stat().st_size == receipt.cipher_size, 'RECOVERY_PACKAGE_INVALID')
-        cipher = path.read_bytes()
+        try:
+            require(type(receipt.cipher_size) is int and 0 < receipt.cipher_size <= MAX_PACKAGE + 65536
+                    and path.stat().st_size == receipt.cipher_size, 'RECOVERY_PACKAGE_INVALID')
+            cipher = path.read_bytes()
+        except OSError:
+            raise Denied('RECOVERY_PACKAGE_UNAVAILABLE') from None
         require(_digest(cipher) == receipt.cipher_hash, 'RECOVERY_PACKAGE_INVALID')
         plain = self.protector.unprotect(cipher, entropy)
         require(type(plain) is bytes and 0 < len(plain) <= MAX_PACKAGE

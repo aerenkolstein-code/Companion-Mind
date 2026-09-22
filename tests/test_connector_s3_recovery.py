@@ -11,6 +11,23 @@ from companion_mind.connector_s3.recovery import RecoveryStore, UserDPAPI
 
 @unittest.skipUnless(os.name == 'nt', 'Windows DPAPI qualification only')
 class NativeRecovery(unittest.TestCase):
+    def test_no_alternative_protector_and_wrong_receipt_binding(self):
+        with tempfile.TemporaryDirectory(dir=Path.cwd()) as directory:
+            with self.assertRaisesRegex(Denied, 'RECOVERY_PROTECTOR_DENIED'):
+                RecoveryStore(directory, 'a' * 64, object())
+            store = RecoveryStore(directory, 'a' * 64, UserDPAPI(current_sid()))
+            receipt = store.save('synthetic-op', b'synthetic-only')
+            with self.assertRaisesRegex(Denied, 'RECOVERY_RECEIPT_INVALID'):
+                store.load(replace(receipt, binding_hash='b' * 64))
+
+    def test_missing_package_has_fixed_failure_code(self):
+        with tempfile.TemporaryDirectory(dir=Path.cwd()) as directory:
+            store = RecoveryStore(directory, 'a' * 64, UserDPAPI(current_sid()))
+            receipt = store.save('synthetic-op', b'synthetic-only')
+            next(Path(directory).iterdir()).unlink()
+            with self.assertRaisesRegex(Denied, '^RECOVERY_PACKAGE_UNAVAILABLE$'):
+                store.load(receipt)
+
     def test_encrypted_package_reopens_and_tamper_is_rejected(self):
         with tempfile.TemporaryDirectory(dir=Path.cwd()) as directory:
             binding_hash = hashlib.sha256(b'synthetic-binding').hexdigest()
