@@ -222,6 +222,34 @@ class CredentialBroker:
             self._active()
             return self.store.read(self.binding.credential_target)
 
+    def desktop_client_secret(self):
+        """Read only this binding's imported Desktop client, with no fallback."""
+        with self.synchronized():
+            require(not self.closed, 'LOCAL_AUTHORIZATION_CLOSED')
+            self.binding.active(require_enrolled=False)
+            self.gate.require_active()
+            record = installed = secret = None
+            try:
+                target = PREFIX + 'DesktopClient.' + self.binding.project_id
+                record = self.store.read_record(target, persist=2)
+                require(type(record) is dict and set(record) == {'installed'},
+                        'DESKTOP_CLIENT_CONFIG_MISSING_OR_INVALID')
+                installed = record['installed']
+                require(type(installed) is dict
+                        and installed.get('client_id') == self.binding.client_id
+                        and installed.get('project_id') == self.binding.project_id
+                        and installed.get('token_uri') == 'https://oauth2.googleapis.com/token',
+                        'DESKTOP_CLIENT_BINDING_MISMATCH')
+                secret = installed.get('client_secret')
+                require(type(secret) is str and 20 <= len(secret) <= 2048
+                        and all(33 <= ord(c) <= 126 for c in secret),
+                        'DESKTOP_CLIENT_SECRET_MISSING_OR_INVALID')
+                self.binding.active(require_enrolled=False)
+                self.gate.require_active()
+                return secret
+            finally:
+                record = installed = secret = None
+
     def install_access_token(self, token, expires_in=3600):
         with self.synchronized():
             require(not self.closed, 'LOCAL_AUTHORIZATION_CLOSED')
