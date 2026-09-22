@@ -3,6 +3,7 @@ from pathlib import Path
 import sys
 import unittest
 from unittest.mock import patch
+from urllib.parse import parse_qs
 
 
 from companion_mind.connector_alpha.contract import Binding, Denied, exact_json
@@ -41,6 +42,13 @@ class FakeTLS:
         return self.responses.pop(0) if self.responses else Response()
     def close(self):
         pass
+
+
+class TokenTLS(FakeTLS):
+    forms = []
+    def request(self, method, path, body=None, headers=None):
+        super().request(method, path, body, headers)
+        self.forms.append(parse_qs(body.decode('ascii'), strict_parsing=True))
 
 
 class TransportBoundary(unittest.TestCase):
@@ -106,6 +114,29 @@ class TransportBoundary(unittest.TestCase):
                 break
         self.assertTrue(denied)
         self.assertLess(len(FakeTLS.calls), 40)
+
+    def test_token_exchange_is_the_only_secret_bearing_request(self):
+        secret = 'SYNTHETIC_ONLY_DESKTOP_CLIENT_SECRET_0123456789'
+        TokenTLS.calls, TokenTLS.responses, TokenTLS.forms = [], [Response()], []
+        with patch('companion_mind.connector_alpha.transport.http.client.HTTPSConnection', TokenTLS):
+            self.t.exchange_code('SYNTHETIC_ONLY_AUTHORIZATION_CODE', 'synthetic-verifier',
+                                 'http://127.0.0.1:8765/callback', secret)
+        self.assertEqual(TokenTLS.calls, [('oauth2.googleapis.com', 'POST', '/token')])
+        self.assertEqual(TokenTLS.forms, [{'client_id': [self.t.binding.client_id], 'client_secret': [secret],
+                                           'code': ['SYNTHETIC_ONLY_AUTHORIZATION_CODE'],
+                                           'code_verifier': ['synthetic-verifier'],
+                                           'grant_type': ['authorization_code'],
+                                           'redirect_uri': ['http://127.0.0.1:8765/callback']}])
+        self.assertNotIn(secret, repr(TokenTLS.calls))
+
+    def test_missing_or_invalid_client_secret_never_dispatches(self):
+        for secret in (None, '', 'too-short', 'contains space', 'x' * 2049):
+            with self.subTest(secret=type(secret).__name__):
+                self.t = GoogleTransport(binding())
+                with self.assertRaises(Denied):
+                    self.t.exchange_code('SYNTHETIC_ONLY_AUTHORIZATION_CODE', 'synthetic-verifier',
+                                         'http://127.0.0.1:8765/callback', secret)
+        self.assertEqual(FakeTLS.calls, [])
 
 
 if __name__ == '__main__':

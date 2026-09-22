@@ -6,6 +6,7 @@ from companion_mind.connector_alpha.contract import Denied
 from companion_mind.connector_alpha.transport import GoogleTransport
 from test_connector_alpha_transport import FakeTLS, Response, binding
 
+CLIENT_SECRET = 'SYNTHETIC_ONLY_DESKTOP_CLIENT_SECRET_0123456789'
 
 class TokenErrorDiagnostics(unittest.TestCase):
     def setUp(self):
@@ -16,7 +17,7 @@ class TokenErrorDiagnostics(unittest.TestCase):
 
     def exchange(self):
         return self.transport.exchange_code('SYNTHETIC_ONLY_AUTHORIZATION_CODE', 'synthetic-verifier',
-                                            'http://127.0.0.1:8765/callback')
+                                            'http://127.0.0.1:8765/callback', CLIENT_SECRET)
 
     def test_allowlisted_token_error_never_leaks_body(self):
         secret = 'SYNTHETIC_SECRET_ERROR_DESCRIPTION'

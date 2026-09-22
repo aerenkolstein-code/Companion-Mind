@@ -113,10 +113,17 @@ For a small predeclared set of exact static descriptions, the receipt may add a
 fixed `detail_hint`; all other descriptions remain `UNCLASSIFIED`. This is a
 classification rule, not evidence about any particular provider response.
 Google's [installed-app guidance](https://developers.google.com/identity/protocols/oauth2/native-app)
-describes `client_secret` as optional. Connector Alpha deliberately does not
-transmit one. A matching local Desktop-client record may exist in the Windows
-Credential Manager for configuration validation, but current transport does not
-consume its optional secret; that is a capability gap, not a conclusion about a
-specific provider failure. Any future support would require a bounded in-memory
-read from that exact dedicated slot and the existing fixed token endpoint, with
-no logging, persistence, or fallback; it is not enabled by this change.
+describes `client_secret` as optional. For this dedicated Desktop client,
+`authorize` now preflights only the exact Windows Credential Manager record
+`CompanionMind.ConnectorAlpha.DesktopClient.<project_id>`: it must be a
+persist-2 `installed` record with the binding's project and client IDs and the
+fixed `https://oauth2.googleapis.com/token` URI. A missing or mismatched record
+fails before binding the loopback listener or opening the browser; there is no
+fallback. The validated secret is held only in process memory for the bounded
+manual-consent callback and single fixed HTTPS `/token` exchange, then its local
+reference is cleared. It is not sent to the browser, reader endpoints, or revoke
+endpoint, and it is never logged, written, or included in a receipt. Immediately
+before the exchange, the binding and interactive session are checked again, so a
+lock or expiry during consent prevents dispatch. This local repair does not
+establish the root cause of a past provider failure or authorize another real
+OAuth attempt.

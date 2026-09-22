@@ -60,15 +60,22 @@ def main(argv=None):
         binding = Binding.load(args.config)
         broker, transport = CredentialBroker(binding), GoogleTransport(binding)
         if args.command == 'authorize':
-            token, installed, listener = None, False, None
+            token, client_secret, installed, listener = None, None, False, None
             transport.cleanup_remote_state = 'NOT_NEEDED'
-            flow = PkceFlow(binding, args.port)
             try:
+                # Deliberately before a listener or browser is opened: a missing or
+                # mismatched desktop-client credential must not start an OAuth visit.
+                client_secret = broker.desktop_client_secret()
+                flow = PkceFlow(binding, args.port)
                 listener = flow.bind_listener()
                 if webbrowser.open(flow.authorization_url) is not True:
                     raise Denied('SYSTEM_BROWSER_UNAVAILABLE')
                 code = flow.await_callback(listener)
-                response = transport.exchange_code(code, flow.verifier, flow.redirect_uri)
+                # The consent window can outlive the initial preflight. Recheck
+                # immediately before the only request that can carry this secret.
+                binding.active(require_enrolled=False)
+                broker.gate.require_active()
+                response = transport.exchange_code(code, flow.verifier, flow.redirect_uri, client_secret)
                 token = response.get('access_token') if type(response) is dict else None
                 require(type(response) is dict and response.get('scope') == SCOPE
                         and response.get('token_type') == 'Bearer'
@@ -89,7 +96,7 @@ def main(argv=None):
                         transport.revoke(token); transport.cleanup_remote_state = 'REVOKED'
                     except BaseException:
                         transport.cleanup_remote_state = 'UNKNOWN'
-                token = code = None
+                token = code = client_secret = None
                 if listener is not None:
                     flow.close_listener(listener)
             _emit(receipt('AUTHORIZED', 'LOCAL_SESSION_CREDENTIAL_STORED', oauth_exchanges=transport.counts['oauth_exchanges'],

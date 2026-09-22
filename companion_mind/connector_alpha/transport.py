@@ -85,9 +85,11 @@ class GoogleTransport:
             self.counts['google_reads'] += 1
         elif operation == 'exchange':
             require(self.counts['oauth_exchanges'] == 0 and token is None, 'REQUEST_DENIED')
-            require(set(form) == {'client_id', 'code', 'code_verifier', 'grant_type', 'redirect_uri'}
+            require(set(form) == {'client_id', 'client_secret', 'code', 'code_verifier', 'grant_type', 'redirect_uri'}
                     and form['client_id'] == b.client_id and form['grant_type'] == 'authorization_code',
                     'REQUEST_DENIED')
+            require(type(form['client_secret']) is str and 20 <= len(form['client_secret']) <= 2048
+                    and all(33 <= ord(c) <= 126 for c in form['client_secret']), 'REQUEST_DENIED')
             self.counts['oauth_exchanges'] += 1
             host, path, method = 'oauth2.googleapis.com', '/token', 'POST'
             body, headers = urlencode(form).encode(), {'Content-Type': 'application/x-www-form-urlencoded'}
@@ -130,9 +132,9 @@ class GoogleTransport:
         finally:
             conn.close()
 
-    def exchange_code(self, code, verifier, redirect):
+    def exchange_code(self, code, verifier, redirect, client_secret):
         return self._exchange('exchange', form={'client_id': self.binding.client_id,
-            'code': code, 'code_verifier': verifier,
+            'client_secret': client_secret, 'code': code, 'code_verifier': verifier,
             'redirect_uri': redirect, 'grant_type': 'authorization_code'})
 
     def read(self, operation, token):
