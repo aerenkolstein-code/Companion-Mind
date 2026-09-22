@@ -38,6 +38,10 @@ from companion_mind.owned_home.tool_gateway import (
 BASE_SHA = "14f0e9cf00413a8ac3ad902b3b9c5641616970a1"
 BASE_TREE = "529eab1585e2598a6da4c846a56e14c743f515c0"
 PROTECTED_TREE = "2d210c5cd283d234ff438487513349430327ed4f"
+ROOT_GITIGNORE_BASE_BLOB = "6174fe7334a7d283b9096f9ce43a72f679af6030"
+ROOT_GITIGNORE_APPROVED_BLOB = "e41bd00ee2232636bf669b900d8109260564f904"
+ROOT_GITIGNORE_APPROVED_APPEND = (b"/tests/.ca_cli_scratch/\n/ca-cli-*/\n/client_secret*.json\n"
+                                  b"/connector-alpha-binding.json\n/connector-alpha-result.json\n")
 CONNECTOR_ALPHA_FILES = frozenset({
     "companion_mind/connector_alpha/__init__.py",
     "companion_mind/connector_alpha/cli.py",
@@ -56,7 +60,10 @@ CONNECTOR_ALPHA_FILES = frozenset({
     "tests/test_connector_alpha_transport.py",
     "tests/test_connector_alpha_transport_diagnostics.py",
     "docs/connector_alpha_local_qualification.md",
+    "docs/connector_alpha_binding_renewal.md",
     "docs/owned_home_connector_alpha_v1.md",
+    "tests/.ca_cli_scratch/.gitignore",
+    "tools/connector_alpha_native_probe.py",
 })
 ALLOWED_FILES = {
     "companion_mind/owned_home/docs_read_guard.py",
@@ -417,11 +424,20 @@ class ReadGuardConformance(unittest.TestCase):
         self.assertTrue(changed <= ALLOWED_FILES, changed)
         self.assertNotIn("companion_mind/connector_alpha/unapproved.py", ALLOWED_FILES)
         self.assertNotIn("companion_mind/owned_home/action_control.py", ALLOWED_FILES)
+        self.assertEqual(git("hash-object", ".gitignore"), ROOT_GITIGNORE_APPROVED_BLOB)
+        approved_ignore = (ROOT / ".gitignore").read_bytes()
+        self.assertTrue(approved_ignore.endswith(ROOT_GITIGNORE_APPROVED_APPEND))
+        base_ignore = approved_ignore[:-len(ROOT_GITIGNORE_APPROVED_APPEND)]
+        base_blob = subprocess.check_output(["git", "hash-object", "-w", "--stdin"],
+                                            cwd=ROOT, input=base_ignore).decode().strip()
+        self.assertEqual(base_blob, ROOT_GITIGNORE_BASE_BLOB)
         with tempfile.TemporaryDirectory() as temp:
             env = dict(os.environ, GIT_INDEX_FILE=str(Path(temp) / "index"))
             subprocess.run(["git", "read-tree", "HEAD"], cwd=ROOT, env=env, check=True)
             surface = [p for p in git("ls-files").splitlines() if p in ALLOWED_FILES]
             subprocess.run(["git", "update-index", "--force-remove", "--", *surface], cwd=ROOT, env=env, check=True)
+            subprocess.run(["git", "update-index", "--cacheinfo", "100644", base_blob, ".gitignore"],
+                           cwd=ROOT, env=env, check=True)
             tree = subprocess.check_output(["git", "write-tree"], cwd=ROOT, env=env, text=True).strip()
         self.assertEqual(tree, PROTECTED_TREE)
         passed("RG-T19", guarded_network_paths=len(NETWORK_PATHS), network_attempts=0,

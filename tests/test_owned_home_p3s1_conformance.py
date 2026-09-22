@@ -33,6 +33,10 @@ from companion_mind.owned_home.shell import make_server
 BASE_SHA = "709c590387f745b8716537f11cc40cd469001753"
 BASE_TREE = "19cdee17eadf4c7aa16709792e33115812d08d6f"
 PROTECTED_TREE = "94d5c674a431f37ca6ff25016afa9f41dd9402cd"
+ROOT_GITIGNORE_BASE_BLOB = "6174fe7334a7d283b9096f9ce43a72f679af6030"
+ROOT_GITIGNORE_APPROVED_BLOB = "e41bd00ee2232636bf669b900d8109260564f904"
+ROOT_GITIGNORE_APPROVED_APPEND = (b"/tests/.ca_cli_scratch/\n/ca-cli-*/\n/client_secret*.json\n"
+                                  b"/connector-alpha-binding.json\n/connector-alpha-result.json\n")
 CONNECTOR_ALPHA_FILES = frozenset({
     "companion_mind/connector_alpha/__init__.py",
     "companion_mind/connector_alpha/cli.py",
@@ -51,7 +55,10 @@ CONNECTOR_ALPHA_FILES = frozenset({
     "tests/test_connector_alpha_transport.py",
     "tests/test_connector_alpha_transport_diagnostics.py",
     "docs/connector_alpha_local_qualification.md",
+    "docs/connector_alpha_binding_renewal.md",
     "docs/owned_home_connector_alpha_v1.md",
+    "tests/.ca_cli_scratch/.gitignore",
+    "tools/connector_alpha_native_probe.py",
 })
 MATRIX = {}
 
@@ -174,6 +181,13 @@ class P3S1Conformance(unittest.TestCase):
         self.assertNotIn("companion_mind/owned_home/action_control.py", allowed)
         def git(*args):
             return subprocess.check_output(["git", *args], cwd=ROOT, text=True).strip()
+        self.assertEqual(git("hash-object", ".gitignore"), ROOT_GITIGNORE_APPROVED_BLOB)
+        approved_ignore = (ROOT / ".gitignore").read_bytes()
+        self.assertTrue(approved_ignore.endswith(ROOT_GITIGNORE_APPROVED_APPEND))
+        base_ignore = approved_ignore[:-len(ROOT_GITIGNORE_APPROVED_APPEND)]
+        base_blob = subprocess.check_output(["git", "hash-object", "-w", "--stdin"],
+                                            cwd=ROOT, input=base_ignore).decode().strip()
+        self.assertEqual(base_blob, ROOT_GITIGNORE_BASE_BLOB)
         # PR checkout may be a shallow synthetic merge commit. Prove that every
         # path outside the approved P3-S1 + compatibility surface is byte-identical
         # by reconstructing the protected tree instead of diffing unavailable parents.
@@ -182,6 +196,8 @@ class P3S1Conformance(unittest.TestCase):
             subprocess.run(["git", "read-tree", "HEAD"], cwd=ROOT, env=env, check=True)
             tracked_surface = [p for p in git("ls-files").splitlines() if p in allowed]
             subprocess.run(["git", "update-index", "--force-remove", "--", *tracked_surface],
+                           cwd=ROOT, env=env, check=True)
+            subprocess.run(["git", "update-index", "--cacheinfo", "100644", base_blob, ".gitignore"],
                            cwd=ROOT, env=env, check=True)
             tree = subprocess.check_output(["git", "write-tree"], cwd=ROOT, env=env, text=True).strip()
         self.assertEqual(tree, PROTECTED_TREE)

@@ -518,6 +518,10 @@ class Slice1Conformance(unittest.TestCase):
             probe.execute("CREATE VIRTUAL TABLE probe USING fts5(body)")
         # WO-A1-A029-P2S5-01 section 4.3: repository preflight only.
         # Fresh base 40389094/tree3a0b5b51; all S4 tool semantics and TS4 protected.
+        root_gitignore_base_blob = "6174fe7334a7d283b9096f9ce43a72f679af6030"
+        root_gitignore_approved_blob = "e41bd00ee2232636bf669b900d8109260564f904"
+        root_gitignore_approved_append = (b"/tests/.ca_cli_scratch/\n/ca-cli-*/\n/client_secret*.json\n"
+                                          b"/connector-alpha-binding.json\n/connector-alpha-result.json\n")
         allowed = {"companion_mind/owned_home/" + name + ".py" for name in
                    ("runtime", "shell", "testport", "trace", "human_control", "continuation")}
         allowed.update({
@@ -549,7 +553,10 @@ class Slice1Conformance(unittest.TestCase):
             "tests/test_connector_alpha_transport.py",
             "tests/test_connector_alpha_transport_diagnostics.py",
             "docs/connector_alpha_local_qualification.md",
+            "docs/connector_alpha_binding_renewal.md",
             "docs/owned_home_connector_alpha_v1.md",
+            "tests/.ca_cli_scratch/.gitignore",
+            "tools/connector_alpha_native_probe.py",
         })
         def permitted(path):
             # Explicitly approved C1 S0 publication compatibility allowance.
@@ -568,6 +575,13 @@ class Slice1Conformance(unittest.TestCase):
         self.assertTrue(all(permitted(p) for p in changed), changed)
         self.assertFalse(permitted("companion_mind/connector_alpha/unapproved.py"))
         self.assertFalse(permitted("companion_mind/owned_home/action_control.py"))
+        self.assertEqual(git("hash-object", ".gitignore"), root_gitignore_approved_blob)
+        approved_ignore = (ROOT / ".gitignore").read_bytes()
+        self.assertTrue(approved_ignore.endswith(root_gitignore_approved_append))
+        base_ignore = approved_ignore[:-len(root_gitignore_approved_append)]
+        base_blob = subprocess.check_output(["git", "hash-object", "-w", "--stdin"],
+                                            cwd=ROOT, input=base_ignore).decode().strip()
+        self.assertEqual(base_blob, root_gitignore_base_blob)
         # Shallow CI need not contain the parent commit object. Reconstruct the
         # unchanged protected tree by removing only the approved mutable surface from
         # HEAD using a temporary index. Exact Git tree equality proves *all*
@@ -577,6 +591,8 @@ class Slice1Conformance(unittest.TestCase):
             subprocess.run(["git", "read-tree", "HEAD"], cwd=ROOT, env=env, check=True)
             added_surface = [p for p in git("ls-files").splitlines() if permitted(p)]
             subprocess.run(["git", "update-index", "--force-remove", "--", *added_surface],
+                           cwd=ROOT, env=env, check=True)
+            subprocess.run(["git", "update-index", "--cacheinfo", "100644", base_blob, ".gitignore"],
                            cwd=ROOT, env=env, check=True)
             reconstructed = subprocess.check_output(["git", "write-tree"], cwd=ROOT, env=env, text=True).strip()
             self.assertEqual(reconstructed, "60b0dc12c68bddf6edb508345c6c6fbccf48cdf7")
