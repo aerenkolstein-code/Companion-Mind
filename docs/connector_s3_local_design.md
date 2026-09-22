@@ -52,16 +52,39 @@ processes against one 30-request bucket, and verifies deletion of both native
 slots. It never uses a real token or calls a provider. Physical lock, reboot,
 refresh, and the 24-hour observation are still untested.
 
-## Remaining implementation gaps
+## Local edit and recovery planning
+
+`docs_plan` parses only one explicit tab of uniform plaintext from a full
+`SUGGESTIONS_INLINE` response. Unsupported structures, suggestions, revision
+absence, mismatched indices, or oversized text are rejected. Edit requests use
+UTF-16 indices, retain the mandatory final newline, and bind
+`requiredRevisionId`. Rollback planning first verifies the expected post-edit
+text and styles, then uses the latest readback revision. These are local
+request plans; no provider operation is performed.
+
+`recovery` uses current-user Windows DPAPI with binding/operation entropy and
+immutable ciphertext files. Load requires both ciphertext and plaintext hashes
+from a receipt that the future broker must pin in the witnessed ledger. No
+plaintext fallback exists. The caller still must enforce operation authorization,
+recovery-package registration, and session state before use.
+
+Synthetic tests exercise Unicode edits, paragraph deletion, restoration,
+revision conflicts, external edit refusal, and native encrypted-package reopen,
+tamper refusal, and wrong-binding refusal. Provider behavior remains unqualified.
+
+Technical sources: [Docs structure and UTF-16](https://developers.google.com/workspace/docs/api/concepts/structure),
+[Docs request constraints](https://developers.google.com/workspace/docs/api/reference/rest/v1/documents/request),
+[Microsoft DPAPI](https://learn.microsoft.com/en-us/windows/win32/api/dpapi/nf-dpapi-cryptprotectdata).
+
+## Remaining integration gaps
 
 - Purpose-bound secret broker, generation/reconnect lifecycle, retest budgets,
   and full account/subject/scope/expiry binding. The native layer is a primitive,
   not a qualified provider broker or complete S3 runtime.
 - Manual CLI/PCKE Picker flow, including the exact `{folder,A,B}` callback.
-- Fixed Drive/Docs transport, real `requiredRevisionId` precondition, UTF-16
-  text editing, snapshots, rollback verification, and `UNKNOWN` reconciliation.
-- Encrypted/private recovery packages, real test
-  qualification, restart/lock tests, and all WO-S3-02 actions.
+- Fixed Drive/Docs transport, broker-enforced real `requiredRevisionId` and
+  durable recovery registration, provider readback and `UNKNOWN` reconciliation.
+- Real test qualification, restart/lock tests, and all WO-S3-02 actions.
 
 Writes must remain blocked until a future adapter obtains a current Docs
 `revisionId` and supplies `requiredRevisionId`; the Docs API rejects a stale
