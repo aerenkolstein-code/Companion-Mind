@@ -574,6 +574,8 @@ class Slice1Conformance(unittest.TestCase):
             "companion_mind/connector_s3/provider.py",
             "companion_mind/connector_s3/transactions.py",
             "companion_mind/connector_s3/executor.py",
+            "companion_mind/connector_s3/credentials.py",
+            "tests/test_connector_s3_credentials.py",
             "tests/test_connector_s3_transport.py",
             "tests/test_connector_s3_provider.py",
             "tests/test_connector_s3_executor.py",
