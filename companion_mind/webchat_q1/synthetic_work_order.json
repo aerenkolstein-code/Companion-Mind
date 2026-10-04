@@ -1,0 +1,10 @@
+{
+  "schema": "webchat-local-work-order/1",
+  "synthetic": true,
+  "wo_id": "A1-CMER-Q1-SYNTHETIC-01",
+  "version": 1,
+  "base_hash": "704da2775a121212d94f658babffffe4793daae3c3fea31e8981b65e34fee4f6",
+  "allowed_files": ["synthetic/input.txt"],
+  "context": "Q1 synthetic input only.\n",
+  "authority_id": "Q1LOCAL-SYNTHETIC-AUTHORITY-01"
+}
