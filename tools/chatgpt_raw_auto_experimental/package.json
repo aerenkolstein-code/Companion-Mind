@@ -1,0 +1,10 @@
+{
+  "name": "c2-chatgpt-raw-auto-experimental",
+  "private": true,
+  "version": "0.0.0-archive",
+  "type": "module",
+  "engines": { "node": ">=24" },
+  "scripts": {
+    "test": "node test-offline.mjs && node test-pending.mjs"
+  }
+}
