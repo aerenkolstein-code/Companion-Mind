@@ -4,6 +4,7 @@ import {fileURLToPath} from 'node:url';
 import {readVisible,stable} from './raw-auto-dom.mjs';
 import {extractMessages,validateCommit,sha256} from './raw-auto-core.mjs';
 import {evaluateRecovery} from './raw-auto-p1.mjs';
+import {evaluateConflictProbe} from './raw-auto-conflict.mjs';
 import {createStore,checkId} from './raw-auto-store.mjs';
 
 const installedRoot=path.dirname(fileURLToPath(import.meta.url));
@@ -108,7 +109,7 @@ async function attach(tab){
  const conn=new Socket(tab.webSocketDebuggerUrl);
  await conn.connect();
  const session={id:tab.id,tabUrl:tab.url,conversationId:trialId||chatId(tab.url),
-  title:tab.title,cdp:conn,candidates:new Map(),conflicts:[],
+  title:tab.title,cdp:conn,candidates:new Map(),conflicts:[],conflictProbe:null,
   requests:new Set(),pendingBodies:new Set(),pendingReads:0,lastEval:0,
   dirtyAt:0,lastTraffic:0,lastError:'',rechecking:false,gapSince:new Date().toISOString(),
   gapReason:'PRE_ATTACH_HISTORY_UNVERIFIED',connectedAt:new Date().toISOString()};
@@ -150,7 +151,7 @@ async function readBody(session,requestId){
     session.candidates.set(m.key,m);changed=true;
    }
   }
-  if(changed){session.dirtyAt=Date.now();session.lastTraffic=Date.now();}
+  if(changed){session.conflictProbe=null;session.dirtyAt=Date.now();session.lastTraffic=Date.now();}
  }catch(e){
   markGap(session,'NETWORK_BODY_READ_FAILED');
   session.lastError=String(e.message).slice(0,80);
@@ -168,14 +169,15 @@ async function evaluate(session){
  try{
   await Promise.allSettled([...session.pendingBodies]);
   const loaded=await store.get(session.conversationId,{url:session.tabUrl,title:session.title});
-  if(loaded.gap.blocked){await statusOnce(loaded.gap.status,session.conversationId);return}
+  if(loaded.gap.blocked){session.conflictProbe=null;await statusOnce(loaded.gap.status,session.conversationId);return}
   const shots=await captureDOM(session);
-  if(!shots.isStable){await statusOnce('P1_DOM_UNSTABLE_HOLD',session.conversationId);return}
+  if(!shots.isStable){session.conflictProbe=null;await statusOnce('P1_DOM_UNSTABLE_HOLD',session.conversationId);return}
   const dom=shots.second,old=loaded.record.messages;
   const tail=old.at(-1)?.key;
   const anchor=tail?dom.findIndex(x=>x.key===tail):-1;
   const suffix=tail?anchor>=0?dom.slice(anchor+1):[]:dom;
   if(tail&&anchor<0){
+   session.conflictProbe=null;
    if(session.conflicts.length){await statusOnce('P2_NETWORK_CONFLICT_HOLD',session.conversationId,{conflicts:session.conflicts.length});return}
    const verified=dom.filter(m=>{
     const net=session.candidates.get(m.key);
@@ -192,23 +194,47 @@ async function evaluate(session){
    return;
   }
   if(suffix.length===0){
+   session.conflictProbe=null;
    if(session.dirtyAt)session.dirtyAt=0;
    await statusOnce('OBSERVED_NO_CHANGE',session.conversationId,{rawCount:old.length,visible:dom.length});
    return;
   }
   if(session.conflicts.length){
+   session.conflictProbe=null;
    await statusOnce('P2_NETWORK_CONFLICT_HOLD',session.conversationId,{conflicts:session.conflicts.length});
    return;
   }
   const network=suffix.map(row=>session.candidates.get(row.key)).filter(m=>m?.final);
-  let decision,mode='P2';
+  let decision,mode='P2',resolvedConflict=null;
   if(network.length===suffix.length){
    decision=validateCommit({
     state:loaded.record,network,observed:dom,archivedThrough:loaded.archivedThrough,
     allowBootstrap:old.length===0
    });
-   if(!decision.ok){await statusOnce(decision.status,session.conversationId,{network:network.length,visible:suffix.length});return}
+   if(!decision.ok){
+    if(decision.status!=='DOM_NETWORK_CONFLICT_HOLD'||old.length===0){
+     session.conflictProbe=null;
+     await statusOnce(decision.status,session.conversationId,{network:network.length,visible:suffix.length});
+     return;
+    }
+    const probe=evaluateConflictProbe({
+     state:loaded.record,archivedThrough:loaded.archivedThrough,
+     first:shots.first,second:dom,networkByKey:session.candidates,
+     previous:session.conflictProbe,now:Date.now(),
+     networkInternallyConflicted:session.conflicts.length>0
+    });
+    session.conflictProbe=probe.next;
+    if(!probe.ok){
+     await statusOnce(probe.status,session.conversationId,{network:network.length,visible:suffix.length,
+      mismatched:probe.evidence?.mismatchedMessages??null});
+     return;
+    }
+    decision=probe.decision;
+    mode='P1_CONFLICT';
+    resolvedConflict=probe.evidence;
+   }else session.conflictProbe=null;
   }else{
+   session.conflictProbe=null;
    if(old.length===0){
     await statusOnce('P2_BOOTSTRAP_INCOMPLETE_HOLD',session.conversationId,{network:network.length,visible:suffix.length});
     return;
@@ -224,10 +250,16 @@ async function evaluate(session){
   }
   const saved=await store.save(session.conversationId,{loaded,decision,mode});
   commits++;
+  if(resolvedConflict){
+   await report('RAW_CONFLICT_RECONCILED',session.conversationId,{method:'P1_TWO_ROUND_DOM',
+    disagreements:resolvedConflict.mismatchedMessages,settleMs:resolvedConflict.elapsedMs,
+    added:saved.added,rawSha256:saved.sha256,cloudCompleteness:'UNKNOWN'});
+  }
   await report('RAW_APPEND_VERIFIED',session.conversationId,{source:mode,added:saved.added,total:saved.count,sha256:saved.sha256,
    historicalCompleteness:'UNKNOWN'});
   for(const m of suffix)session.candidates.delete(m.key);
   session.dirtyAt=0;
+  session.conflictProbe=null;
   seenStatuses.delete(session.conversationId);
  }catch(e){
   holds++;
