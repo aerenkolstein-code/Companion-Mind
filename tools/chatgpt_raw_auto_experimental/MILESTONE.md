@@ -36,3 +36,20 @@ Those cases stay HOLD, with pending evidence kept non-authoritative.
 Do not run this together with any other RAW writer to the same sessions
 directory. Any long-term multi-chat unattended operation or P3 fan-out
 requires separately scoped validation and authorization.
+
+## 2026-10-24 addendum: conflict correction
+
+A scoped same-message P2/DOM conflict reconciliation module was added. It
+requires a known history anchor and two separated stable, final DOM rounds.
+The candidate is written solely by P0; each successful resolution emits
+explicit status/evidence and leaves older RAW messages unchanged.
+
+- New synthetic conflict regression: 21 / 21 PASS.
+- Existing offline / PENDING regressions: 21 / 21 and 7 / 7 PASS.
+- Combined synthetic regression: 49 / 49 PASS.
+- Local production installation and read-only post-install observation: PASS.
+- Real new conflict resolved after this patch: NOT YET OBSERVED.
+- L0, Journal, boot guard and main branch: unchanged by this addendum.
+
+The released code is an archival snapshot only. No claim of complete cloud
+history, independent acceptance, or new live conflict repair is made.
