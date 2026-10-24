@@ -1,0 +1,8 @@
+sessions/
+l0-checkpoints/
+raw-auto-pending/
+raw-auto-status.log
+*.pid
+*.log
+*.tmp.*
+*.lock
