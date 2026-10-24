@@ -28,6 +28,7 @@ does not prove full history, cross-device coverage, or no network loss.
     node --check raw-auto.mjs
     node test-offline.mjs
     node test-pending.mjs
+    node test-conflict.mjs
 
 The tests use synthetic messages only. Checks cover message completion,
 duplicate IDs, history-prefix protection, stable DOM suffix recovery, atomic
@@ -66,3 +67,22 @@ and the local original did not enable P3 L0 or Journal integrations.
 
 This branch is a publication archive only; it is not a merge to main.
 See MILESTONE.md for further evidence boundaries.
+
+## Conflict auto-reconciliation patch (2026-10-24)
+
+When a completed P2 network text candidate disagrees with DOM for the same
+message ID, the collector enters a bounded P1 reconciliation path. It requires
+the old RAW tail anchor, two separate stable/final DOM observation rounds at
+least 9 seconds apart, unchanged fingerprint/order, and a valid P0-only append.
+A successful atomic readback produces RAW_CONFLICT_RECONCILED and
+RAW_APPEND_VERIFIED events. Source-specific hashes are retained for audit.
+
+Network-internal contradictory final candidates, incomplete DOM, missing tail,
+archived revisions, ambiguous order, or missing corroboration remain HOLD.
+The program does not overwrite existing RAW or infer canonical cloud history.
+
+The 21 new synthetic conflict tests passed. This patch has been installed in
+one local, running single-target collector, but a subsequent real newly
+observed conflict automatically resolved by this patch has not yet been
+verified. This publication is therefore a code and regression milestone,
+not full live conflict-resolution acceptance.
