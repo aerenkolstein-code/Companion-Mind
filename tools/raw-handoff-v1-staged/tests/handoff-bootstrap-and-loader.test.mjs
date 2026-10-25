@@ -1,0 +1,43 @@
+import assert from 'node:assert/strict';
+import fs from 'node:fs/promises';
+import path from 'node:path';
+import {fileURLToPath} from 'node:url';
+import {checkBootstrapRounds} from '../handoff-bootstrap-policy.mjs';
+import {createTargetLoader} from '../handoff-target-loader.mjs';
+const registry=JSON.parse(await fs.readFile(new URL('../handoff-registry.json',import.meta.url),'utf8'));
+const trigger='user:aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa',reply='assistant:bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb';
+const message=[{key:trigger,role:'user',text:'接续旧窗口',final:true},{key:reply,role:'assistant',text:'你好，我已承接这个窗口',final:true}];
+const make=(messages=message,at='2026-10-25T00:01:00Z')=>({topReached:true,bottomReached:true,observedAt:at,messages,windowCount:1});
+const first=make(),second=make(message,'2026-10-25T00:01:35Z');
+let pass=0;async function t(label,fn){try{await fn();pass++;console.log('PASS '+label)}catch(e){console.error('FAIL '+label+': '+e.message);process.exitCode=1}}
+await t('two-round complete prefix accepted',async()=>assert.equal(checkBootstrapRounds({first,second,triggerKey:trigger}).ok,true));
+await t('stream in progress blocked',async()=>assert.equal(checkBootstrapRounds({first,second,triggerKey:trigger,stream:'IS_STREAMING'}).status,'HANDOFF_BOOTSTRAP_STREAM_INCOMPLETE_HOLD'));
+await t('first user alone blocked',async()=>assert.equal(checkBootstrapRounds({first:make(message.slice(0,1)),second:make(message.slice(0,1),'2026-10-25T00:01:35Z'),triggerKey:trigger}).status,'HANDOFF_BOOTSTRAP_UNPAIRED_USER_HOLD'));
+await t('short settle time blocked',async()=>assert.equal(checkBootstrapRounds({first,second:make(message,'2026-10-25T00:01:20Z'),triggerKey:trigger}).status,'HANDOFF_BOOTSTRAP_SETTLE_TIME_HOLD'));
+await t('answer text changed blocked',async()=>assert.equal(checkBootstrapRounds({first,second:make([{...message[0]},{...message[1],text:'partial'}],'2026-10-25T00:01:35Z'),triggerKey:trigger}).status,'HANDOFF_BOOTSTRAP_ROUNDS_DIFFER_HOLD'));
+await t('top not reached blocked',async()=>assert.equal(checkBootstrapRounds({first:{...first,topReached:false},second,triggerKey:trigger}).status,'HANDOFF_BOOTSTRAP_BOUNDS_UNVERIFIED_HOLD'));
+await t('final marker false blocked',async()=>assert.equal(checkBootstrapRounds({first:make([{...message[0]},{...message[1],final:false}]),second:make([{...message[0]},{...message[1],final:false}],'2026-10-25T00:01:35Z'),triggerKey:trigger}).status,'HANDOFF_BOOTSTRAP_INCOMPLETE_OR_INVALID_HOLD'));
+await t('missing trigger blocked',async()=>assert.equal(checkBootstrapRounds({first,second,triggerKey:'user:other'}).status,'HANDOFF_BOOTSTRAP_TRIGGER_MISSING_HOLD'));
+await t('reused key blocked',async()=>{const v=[message[0],{...message[1],key:message[0].key}];assert.equal(checkBootstrapRounds({first:make(v),second:make(v,'2026-10-25T00:01:35Z'),triggerKey:trigger}).status,'HANDOFF_BOOTSTRAP_DUPLICATE_KEY_HOLD')});
+const temp=path.join(path.dirname(fileURLToPath(import.meta.url)),'loader-temp-'+process.pid+'.json');
+try{
+ await fs.writeFile(temp,JSON.stringify(registry),'utf8');
+ const loader=createTargetLoader(temp);
+ await t('loader accepts valid baseline',async()=>{const x=await loader.refresh();assert.equal(x.changed,true);assert.equal(x.ids.length,2)});
+ await t('loader stable idempotence',async()=>assert.equal((await loader.refresh()).changed,false));
+ const extra=structuredClone(registry);
+ extra.revision=1;extra.targets.push({id:'11111111-2222-4333-8444-555555555555',status:'BOOTSTRAP_PENDING',authorized:true});extra.currentHandoff={from:registry.activeConversationId,to:'11111111-2222-4333-8444-555555555555',status:'PREPARED',triggerKey:trigger};
+ await fs.writeFile(temp,JSON.stringify(extra),'utf8');
+ await t('loader hot adds new window without restart',async()=>{const x=await loader.refresh();assert.equal(x.changed,true);assert.equal(x.ids.length,3)});
+ const edit=structuredClone(extra);edit.targets[0].status='SEALED';edit.revision=1;
+ await fs.writeFile(temp,JSON.stringify(edit));
+ await t('same revision content drift blocked',async()=>await assert.rejects(loader.refresh(),/HANDOFF_REGISTRY_CHANGED_WITHOUT_REVISION_HOLD/));
+ const drop=structuredClone(extra);drop.revision=2;drop.targets=drop.targets.filter(x=>x.id!==registry.targets[0].id);
+ await fs.writeFile(temp,JSON.stringify(drop));
+ await t('cannot silently remove old target',async()=>await assert.rejects(loader.refresh(),/HANDOFF_UNAUTHORIZED_TARGET_REMOVAL_HOLD/));
+ const roll=structuredClone(extra);roll.revision=0;
+ await fs.writeFile(temp,JSON.stringify(roll));
+ await t('registry rollback rejected',async()=>await assert.rejects(loader.refresh(),/HANDOFF_REGISTRY_ROLLBACK_HOLD/));
+}finally{await fs.unlink(temp).catch(()=>{})}
+console.log(JSON.stringify({passed:pass,expected:15,allPassed:pass===15}));
+if(pass!==15)process.exitCode=1;
